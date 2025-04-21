@@ -319,12 +319,6 @@ GLIDE::build(IndexParameter &build_param, SearchParameter &search_param_knn, Sea
              raft::host_vector_view<uint32_t> h_map_view,
              std::optional<raft::device_matrix<float>> &d_reorder_data,
              std::string result_file) {
-    uint32_t reorder_num = d_reorder_data->extent(0);
-
-    std::cout << "op_number: " << num() << std::endl;
-    std::cout << "reorder_number: " << reorder_num << std::endl;
-    std::cout << "dim: " << dim() << std::endl;
-
     float build_time = 0.0f;
 
     auto h_start_point = raft::make_host_vector<uint32_t, uint32_t>(handle, d_segment_start->size() - 1);
@@ -363,15 +357,23 @@ GLIDE::build(IndexParameter &build_param, SearchParameter &search_param_knn, Sea
     result_out.close();
 }
 
-void GLIDE::search(SearchParameter &param, raft::device_matrix_view<float> d_query_view,
-                 raft::host_matrix<uint32_t> &result_ids,
-                 raft::host_matrix<float> &result_distances,
-                 std::string result_file) {
+void
+GLIDE::search(SearchParameter &param,
+              raft::device_matrix_view<float> d_query_view,
+              raft::host_matrix<uint32_t> &result_ids,
+              raft::host_matrix<float> &result_dists,
+              std::string result_file) {
     uint32_t query_number = d_query_view.extent(0);
+    uint32_t top_k = param.topk;
+
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    float milliseconds = 0;
 
     cudaDeviceProp deviceProp = raft::resource::get_device_properties(handle);
-
-    nvtxRangePushA(__FUNCTION__);
+    uint32_t max_grid_size = deviceProp.maxGridSize[1];
+    uint32_t max_queries = std::min(query_number, max_grid_size);
 
     uint32_t result_buffer_size = param.beam + graph_degree();
     result_buffer_size = roundUp32(result_buffer_size);
@@ -381,13 +383,8 @@ void GLIDE::search(SearchParameter &param, raft::device_matrix_view<float> d_que
                                1 * sizeof(uint32_t) + 3 * sizeof(uint32_t) + 1 * sizeof(uint32_t);
     assert(shared_mem_size <= deviceProp.sharedMemPerBlock);
 
-    uint32_t topk = param.topk;
-
-    uint32_t max_grid_size = deviceProp.maxGridSize[1];
-    uint32_t max_queries = std::min(query_number, max_grid_size);
-
-    auto d_result_ids = raft::make_device_matrix<uint32_t>(handle, query_number, topk);
-    auto d_result_distances = raft::make_device_matrix<float>(handle, query_number, topk);
+    auto d_result_ids = raft::make_device_matrix<uint32_t>(handle, query_number, top_k);
+    auto d_result_dists = raft::make_device_matrix<float>(handle, query_number, top_k);
 
     auto kernel = search_kernel_config::choose_kernel(param.beam, graph_degree(), centroid_num());
 
@@ -395,9 +392,6 @@ void GLIDE::search(SearchParameter &param, raft::device_matrix_view<float> d_que
                                        cudaFuncAttributeMaxDynamicSharedMemorySize,
                                        shared_mem_size));
 
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
     cudaEventRecord(start);
     for (uint32_t qid = 0; qid < query_number; qid += max_queries) {
         uint32_t number_for_search = std::min(max_queries, query_number - qid);
@@ -408,14 +402,14 @@ void GLIDE::search(SearchParameter &param, raft::device_matrix_view<float> d_que
         std::cout << "threads per block: " << threads_per_block << "   " << "blocks_per_grim: " << blocks_per_grim
                   << std::endl;
 
-        auto d_result_ids_ptr = d_result_ids.data_handle() + qid * topk;
-        auto d_result_distances_ptr = d_result_distances.data_handle() + qid * topk;
+        auto d_result_ids_ptr = d_result_ids.data_handle() + qid * top_k;
+        auto d_result_dists_ptr = d_result_dists.data_handle() + qid * top_k;
         auto d_query_ptr = d_query_view.data_handle() + qid * dim();
         cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
 
         kernel<<<blocks_per_grim, threads_per_block, shared_mem_size, stream>>>(d_result_ids_ptr,
-                                                                                d_result_distances_ptr,
-                                                                                topk,
+                                                                                d_result_dists_ptr,
+                                                                                top_k,
                                                                                 data_view().data_handle(),
                                                                                 d_query_ptr,
                                                                                 graph_view().data_handle(),
@@ -434,7 +428,6 @@ void GLIDE::search(SearchParameter &param, raft::device_matrix_view<float> d_que
     }
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
-    float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
     float seconds = milliseconds / 1000.0f;
     std::cout << "query time: " << seconds << " s" << "   " << "QPS: " << (float) query_number / seconds << std::endl;
@@ -445,9 +438,9 @@ void GLIDE::search(SearchParameter &param, raft::device_matrix_view<float> d_que
     result << seconds << "," << (float) query_number / seconds << ",";
     result.close();
 
-    raft::copy(result_ids.data_handle(), d_result_ids.data_handle(), query_number * topk,
+    raft::copy(result_ids.data_handle(), d_result_ids.data_handle(), query_number * top_k,
                raft::resource::get_cuda_stream(handle));
-    raft::copy(result_distances.data_handle(), d_result_distances.data_handle(), query_number * topk,
+    raft::copy(result_dists.data_handle(), d_result_dists.data_handle(), query_number * top_k,
                raft::resource::get_cuda_stream(handle));
     nvtxRangePop();
 }

@@ -28,12 +28,12 @@ uint32_t calculate_recall(raft::host_matrix_view<uint32_t> neighbors,
 
 
 int main(int argc, char **argv) {
-//    if (argc != 10) {
-//        std::cout << argv[0]
-//                  << "data_file query_file truth_file preprocess_file graph_base_file result_file metric topk search_beam"
-//                  << std::endl;
-//        exit(-1);
-//    }
+    if (argc != 10) {
+        std::cout << argv[0]
+                  << "data_file query_file truth_file preprocess_file graph_base_file result_file metric topk search_beam"
+                  << std::endl;
+        exit(-1);
+    }
 
     cudaSetDevice(1);
     raft::device_resources handle;
@@ -58,17 +58,13 @@ int main(int argc, char **argv) {
     }
 
     auto data = load_data<float, uint32_t>(data_file);
+    auto query = load_data<float, uint32_t>(query_file);
+    auto truth = load_data<uint32_t, uint32_t>(truth_file);
     auto graph = load_graph<uint32_t, uint32_t>(graph_file);
     auto start_point = load_start_point(start_point_file);
     auto centroids = load_data<float, uint32_t>(centroid_file);
 
-    uint32_t number = data.extent(0);
-    uint32_t dim = data.extent(1);
     uint32_t degree = graph.extent(1);
-
-    GLIDE index(handle, degree, data.view(), centroids.view(), index_metric);
-    index.load(graph.view(), start_point.view());
-
     SearchParameter search_param;
     search_param.topk = std::stoi(argv[8]);
     search_param.beam = std::stoi(argv[9]);
@@ -85,13 +81,17 @@ int main(int argc, char **argv) {
                                                                      search_param.hash_max_fill_rate,
                                                                      search_param.hash_bit);
 
-    auto d_query = load_query(query_file, handle);
+    GLIDE index(handle, degree, data.view(), centroids.view(), index_metric);
+    index.load(graph.view(), start_point.view());
+
+    auto d_query = raft::make_device_matrix<float>(handle, query.extent(0), query.extent(1));
+    raft::copy(d_query.data_handle(), query.data_handle(),
+               query.size(), raft::resource::get_cuda_stream(handle));
     auto result_ids = raft::make_host_matrix<uint32_t>(d_query.extent(0), search_param.topk);
-    auto result_distances = raft::make_host_matrix<float>(d_query.extent(0), search_param.topk);
+    auto result_dists = raft::make_host_matrix<float>(d_query.extent(0), search_param.topk);
 
-    index.search(search_param, d_query.view(), result_ids, result_distances, result_file);
+    index.search(search_param, d_query.view(), result_ids, result_dists, result_file);
 
-    auto truth = load_data<uint32_t, uint32_t>(truth_file);
     float recall = calculate_recall(result_ids.view(), truth.view(), search_param.topk);
 
     std::ofstream result;

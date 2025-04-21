@@ -3,12 +3,12 @@
 #include <fstream>
 
 int main(int argc, char **argv) {
-//    if (argc != 5) {
-//        std::cout << argv[0]
-//                  << "preprocess_file knn_file result_file knn_degree"
-//                  << std::endl;
-//        exit(-1);
-//    }
+    if (argc != 5) {
+        std::cout << argv[0]
+                  << "preprocess_file knn_file result_file knn_degree"
+                  << std::endl;
+        exit(-1);
+    }
 
     cudaSetDevice(1);
     raft::device_resources handle;
