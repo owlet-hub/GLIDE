@@ -2,24 +2,24 @@
 #include "glide_large_impl.cuh"
 #include <fstream>
 
-float calculate_recall(raft::host_matrix_view<uint32_t> neighbors,
-                       raft::host_matrix_view<uint32_t> truth,
-                       uint32_t topk) {
+uint32_t calculate_recall(raft::host_matrix_view<uint32_t> neighbors,
+                          raft::host_matrix_view<uint32_t> truth,
+                          uint32_t top_k) {
     uint32_t query_num = neighbors.extent(0);
     float total_recall = 0.0;
 
     for (uint32_t query_id = 0; query_id < query_num; query_id++) {
         uint32_t correct_count = 0;
-        for (uint32_t k = 0; k < topk; k++) {
+        for (uint32_t k = 0; k < top_k; k++) {
             uint32_t neighbor_id = neighbors(query_id, k);
-            for (uint32_t t = 0; t < topk; t++) {
+            for (uint32_t t = 0; t < top_k; t++) {
                 if (truth(query_id, t) == neighbor_id) {
                     correct_count++;
                     break;
                 }
             }
         }
-        float recall = static_cast<float>(correct_count) / topk;
+        float recall = static_cast<float>(correct_count) / top_k;
         total_recall += recall;
     }
     std::cout << "total_recall: " << total_recall / query_num << std::endl;
@@ -68,29 +68,27 @@ int main(int argc, char **argv) {
     result_out<<search_param.beam<<",";
     result_out.close();
 
-    GLIDE_for_large index(handle, index_metric, reorder_file, map_file, centroid_file,
-                          segment_file, start_point_file, graph_file);
+    GLIDE_large index(handle, index_metric,
+              reorder_file, map_file, centroid_file,
+              segment_file, start_point_file, graph_file);
 
     adjust_search_params(search_param.min_iterations, search_param.max_iterations, search_param.beam);
-    search_param.hash_bit = calculate_hash_bitlen(search_param.beam,
-                                                  index.graph_degree(), search_param.hash_max_fill_rate,
+    search_param.hash_bit = calculate_hash_bitlen(search_param.beam, index.graph_degree(),
+                                                  search_param.hash_max_fill_rate,
                                                   search_param.hashmap_min_bitlen);
     search_param.hash_reset_interval = calculate_hash_reset_interval(search_param.beam,
                                                                      index.graph_degree(),
                                                                      search_param.hash_max_fill_rate,
                                                                      search_param.hash_bit);
 
-    auto query = load_data<uint8_t, uint32_t>(query_file);
-    auto truth = load_data<uint32_t, uint32_t>(truth_file);
-
-    auto d_query = raft::make_device_matrix<uint8_t, uint32_t>(handle, query.extent(0), query.extent(1));
-    raft::copy(d_query.data_handle(), query.data_handle(), query.size(), raft::resource::get_cuda_stream(handle));
+    auto d_query = load_query_uint8(query_file, handle);
     auto result_ids = raft::make_host_matrix<uint32_t, uint32_t>(d_query.extent(0), search_param.topk);
     auto result_distances = raft::make_host_matrix<float, uint32_t>(d_query.extent(0), search_param.topk);
 
     index.search(search_param, min_segment_num, boundary_factor, d_query.view(), result_ids.view(),
                  result_distances.view(), result_file);
 
+    auto truth = load_data<uint32_t, uint32_t>(truth_file);
     float recall = calculate_recall(result_ids.view(), truth.view(), search_param.topk);
 
     std::ofstream result;

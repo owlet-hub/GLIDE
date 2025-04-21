@@ -1,7 +1,6 @@
 #pragma once
 
 #include "hashmap.cuh"
-#include "utils.cuh"
 
 enum class Metric {
     Euclidean,
@@ -30,6 +29,9 @@ struct IndexParameter {
     uint32_t knn_degree = 32;
     float relaxant_factor = 1.05;
     Metric metric = Metric::Euclidean;
+    raft::host_vector_view<uint32_t> segment_start_view;
+    raft::host_vector_view<uint32_t> segment_length_view;
+    raft::host_vector_view<uint32_t> mapping_view;
 };
 
 struct SearchParameter {
@@ -45,8 +47,7 @@ struct SearchParameter {
 };
 
 inline uint32_t
-calculate_hash_bitlen(uint32_t beam, uint32_t graph_degree,
-                      float hashmap_max_fill_rate, uint32_t hashmap_min_bitlen) {
+calculate_hash_bitlen(uint32_t beam, uint32_t graph_degree, float hashmap_max_fill_rate, uint32_t hashmap_min_bitlen) {
     uint32_t hash_bitlen = 0;
     uint32_t max_visited_nodes = beam + graph_degree;
     uint32_t min_bitlen = 8;
@@ -65,14 +66,14 @@ calculate_hash_bitlen(uint32_t beam, uint32_t graph_degree,
 }
 
 inline uint32_t
-calculate_hash_reset_interval(uint32_t beam, uint32_t graph_degree,
-                              float hashmap_max_fill_rate, uint32_t hash_bitlen) {
+calculate_hash_reset_interval(uint32_t beam, uint32_t graph_degree, float hashmap_max_fill_rate, uint32_t hash_bitlen) {
     uint32_t hash_reset_interval = 1024 * 1024;
     hash_reset_interval = 1;
     while (1) {
-        const auto max_visited_nodes =
-                beam + (graph_degree * (hash_reset_interval + 1));
-        if (max_visited_nodes > hashmap::get_size(hash_bitlen) * hashmap_max_fill_rate) { break; }
+        const auto max_visited_nodes = beam + graph_degree * (hash_reset_interval + 1);
+        if (max_visited_nodes > hashmap::get_size(hash_bitlen) * hashmap_max_fill_rate) {
+            break;
+        }
         hash_reset_interval += 1;
     }
     return hash_reset_interval;
@@ -90,5 +91,9 @@ adjust_search_params(uint32_t min_iterations, uint32_t &max_iterations, uint32_t
     if (max_iterations < _max_iterations) {
         max_iterations = _max_iterations;
     }
-    beam = roundUp32(beam);
+    if (beam % 32) {
+        uint32_t itopk32 = beam;
+        itopk32 += 32 - (beam % 32);
+        beam = itopk32;
+    }
 }

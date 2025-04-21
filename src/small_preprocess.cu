@@ -4,12 +4,12 @@
 #include <fstream>
 
 int main(int argc, char **argv) {
-    if (argc != 8) {
-        std::cout << argv[0]
-                  << "data_file preprocess_file result_file centroid_num boundary_factor sample_factor metric"
-                  << std::endl;
-        exit(-1);
-    }
+//    if (argc != 8) {
+//        std::cout << argv[0]
+//                  << "data_file preprocess_file result_file centroid_num boundary_factor sample_factor metric"
+//                  << std::endl;
+//        exit(-1);
+//    }
 
     cudaSetDevice(1);
     raft::device_resources handle;
@@ -44,6 +44,7 @@ int main(int argc, char **argv) {
     auto h_segment_start = raft::make_host_vector<uint32_t>(partition_param.centroid_num + 1);
     auto h_segment_length = raft::make_host_vector<uint32_t>(partition_param.centroid_num + 1);
     auto d_centroids = raft::make_device_matrix<float, int>(handle, partition_param.centroid_num, dim);
+
 
     auto d_data = raft::make_device_matrix<float>(handle, num, dim);
     raft::copy(d_data.data_handle(), h_data.data_handle(),

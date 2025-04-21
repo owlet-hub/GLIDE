@@ -11,6 +11,8 @@ __host__ __device__ constexpr inline uint32_t warp_size() { return 32; }
 
 __host__ __device__ constexpr inline uint32_t warp_full_mask() { return 0xffffffff; }
 
+__host__ __device__ constexpr inline uint32_t uint32_t_max() { return 0xffffffffu; }
+
 __host__ __device__ inline uint32_t xorshift32(uint32_t u) {
     u ^= u >> 13;
     u ^= u << 27;
@@ -22,8 +24,8 @@ static constexpr __host__ __device__ __forceinline__ uint32_t roundUp32(uint32_t
     return (p + 31) & (~31);
 }
 
-template<typename Type>
-constexpr inline __host__ __device__ Type ceildiv(Type a, Type b) {
+template<typename IntType>
+constexpr inline __host__ __device__ IntType ceildiv(IntType a, IntType b) {
     return (a + b - 1) / b;
 }
 
@@ -38,6 +40,10 @@ __host__ __device__ inline T swizzling(T x) {
 
 template<typename Type>
 __host__ __device__ inline Type get_max_value();
+template <>
+__host__ __device__ inline int get_max_value<int>() {
+    return INT_MAX;
+};
 template <>
 __host__ __device__ inline float get_max_value<float>() {
     return FLT_MAX;

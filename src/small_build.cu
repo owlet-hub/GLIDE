@@ -3,12 +3,12 @@
 #include <fstream>
 
 int main(int argc, char **argv) {
-    if (argc != 12) {
-        std::cout << argv[0]
-                  << "data_file preprocess_file knn_file graph_base_file result_file metric graph_degree knn_degree relaxant_factor beam refine_beam"
-                  << std::endl;
-        exit(-1);
-    }
+//    if (argc != 12) {
+//        std::cout << argv[0]
+//                  << "data_file preprocess_file knn_file graph_base_file result_file metric graph_degree knn_degree relaxant_factor beam refine_beam"
+//                  << std::endl;
+//        exit(-1);
+//    }
 
     cudaSetDevice(1);
     raft::device_resources handle;
@@ -61,13 +61,13 @@ int main(int argc, char **argv) {
                                                                             search_param_refine.hash_max_fill_rate,
                                                                             search_param_refine.hash_bit);
 
-    auto op_data = load_data<float, uint32_t>(data_file);
-    auto centroids = load_data<float, uint32_t>(centroid_file);
-    auto segment_start = load_segment_start(segment_file);
-    auto segment_length = load_segment_length(segment_file);
-    auto map = load_map(map_file);
-    auto reorder_data = load_data<float, uint32_t>(reorder_file);
-    auto knn_graph = load_graph<uint32_t, uint32_t>(knn_file);
+    auto h_data = load_data<float, uint32_t>(data_file);
+    auto h_centroids = load_data<float, uint32_t>(centroid_file);
+    auto h_segment_start = load_segment_start(segment_file);
+    auto h_segment_length = load_segment_length(segment_file);
+    auto h_map = load_map(map_file);
+    auto h_reorder_data = load_data<float, uint32_t>(reorder_file);
+    auto h_knn_graph = load_graph<uint32_t, uint32_t>(knn_file);
 
     std::optional<raft::device_matrix<float>> d_reorder_data;
     std::optional<raft::device_vector<uint32_t>> d_map;
@@ -75,44 +75,44 @@ int main(int argc, char **argv) {
     std::optional<raft::device_vector<uint32_t>> d_segment_length;
     std::optional<raft::device_matrix<uint32_t>> d_knn_graph;
 
-    d_reorder_data.emplace(raft::make_device_matrix<float>(handle, reorder_data.extent(0), reorder_data.extent(1)));
-    d_map.emplace(raft::make_device_vector<uint32_t, uint32_t>(handle, map.size()));
-    d_segment_start.emplace(raft::make_device_vector<uint32_t, uint32_t>(handle, segment_start.size()));
-    d_segment_length.emplace(raft::make_device_vector<uint32_t, uint32_t>(handle, segment_length.size()));
-    d_knn_graph.emplace(raft::make_device_matrix<uint32_t>(handle, knn_graph.extent(0), knn_graph.extent(1)));
+    d_reorder_data.emplace(raft::make_device_matrix<float>(handle, h_reorder_data.extent(0), h_reorder_data.extent(1)));
+    d_map.emplace(raft::make_device_vector<uint32_t, uint32_t>(handle, h_map.size()));
+    d_segment_start.emplace(raft::make_device_vector<uint32_t, uint32_t>(handle, h_segment_start.size()));
+    d_segment_length.emplace(raft::make_device_vector<uint32_t, uint32_t>(handle, h_segment_length.size()));
+    d_knn_graph.emplace(raft::make_device_matrix<uint32_t>(handle, h_knn_graph.extent(0), h_knn_graph.extent(1)));
 
-    raft::copy(d_reorder_data->data_handle(), reorder_data.data_handle(),
-               reorder_data.size(), raft::resource::get_cuda_stream(handle));
-    raft::copy(d_map->data_handle(), map.data_handle(),
-               map.size(), raft::resource::get_cuda_stream(handle));
-    raft::copy(d_segment_start->data_handle(), segment_start.data_handle(),
-               segment_start.size(), raft::resource::get_cuda_stream(handle));
-    raft::copy(d_segment_length->data_handle(), segment_length.data_handle(),
-               segment_length.size(), raft::resource::get_cuda_stream(handle));
-    raft::copy(d_knn_graph->data_handle(), knn_graph.data_handle(),
-               knn_graph.size(), raft::resource::get_cuda_stream(handle));
+    raft::copy(d_reorder_data->data_handle(), h_reorder_data.data_handle(),
+               h_reorder_data.size(), raft::resource::get_cuda_stream(handle));
+    raft::copy(d_map->data_handle(), h_map.data_handle(),
+               h_map.size(), raft::resource::get_cuda_stream(handle));
+    raft::copy(d_segment_start->data_handle(), h_segment_start.data_handle(),
+               h_segment_start.size(), raft::resource::get_cuda_stream(handle));
+    raft::copy(d_segment_length->data_handle(), h_segment_length.data_handle(),
+               h_segment_length.size(), raft::resource::get_cuda_stream(handle));
+    raft::copy(d_knn_graph->data_handle(), h_knn_graph.data_handle(),
+               h_knn_graph.size(), raft::resource::get_cuda_stream(handle));
 
-    GLIDE index(handle, build_param.graph_degree, op_data.view(), centroids.view(), build_param.metric);
+    GLIDE index(handle, build_param.graph_degree, h_data.view(), h_centroids.view(), build_param.metric);
 
     std::ofstream result_out;
     result_out.open(result_file, std::ios::app);
-    result_out << build_param.graph_degree << ",";
+    result_out << build_param.graph_degree <<",";
     result_out.close();
 
     index.build(build_param, search_param_knn, search_param_refine, d_knn_graph, d_segment_start, d_segment_length,
-                d_map, segment_start.view(), segment_length.view(), map.view(), d_reorder_data, result_file);
+                d_map, h_segment_start.view(), h_segment_length.view(), h_map.view(),d_reorder_data,
+                result_file);
 
     uint32_t num = index.num();
     uint32_t degree = index.graph_degree();
-    auto graph = raft::make_host_matrix<uint32_t>(num, build_param.graph_degree);
-    raft::copy(graph.data_handle(), index.graph_view().data_handle(),
-               graph.size(), raft::resource::get_cuda_stream(handle));
+    auto graph = raft::make_host_matrix<uint32_t>(num, degree);
+    raft::copy(graph.data_handle(), index.graph_view().data_handle(), graph.size(),
+               raft::resource::get_cuda_stream(handle));
     auto start_point = raft::make_host_vector<uint32_t>(index.start_point_num());
-    raft::copy(start_point.data_handle(), index.start_point_view().data_handle(),
-               start_point.size(), raft::resource::get_cuda_stream(handle));
+    raft::copy(start_point.data_handle(), index.start_point_view().data_handle(), start_point.size(),
+               raft::resource::get_cuda_stream(handle));
 
     std::ofstream out(graph_file, std::ios::binary);
-
     out.write(reinterpret_cast<const char *>(&num), sizeof(uint32_t));
     out.write(reinterpret_cast<const char *>(&degree), sizeof(uint32_t));
     for (int i = 0; i < num; i++) {
@@ -122,8 +122,8 @@ int main(int argc, char **argv) {
     out.close();
 
     std::ofstream start_point_out(start_point_file, std::ios::binary);
-    uint32_t start_point_num = index.start_point_num();
-    start_point_out.write(reinterpret_cast<const char *>(&start_point_num), sizeof(uint32_t));
-    start_point_out.write(reinterpret_cast<const char *>(start_point.data_handle()), start_point_num * sizeof(uint32_t));
+    uint32_t start_point_size = index.start_point_num();
+    start_point_out.write(reinterpret_cast<const char *>(&start_point_size), sizeof(uint32_t));
+    start_point_out.write(reinterpret_cast<const char *>(start_point.data_handle()), start_point_size * sizeof(uint32_t));
     start_point_out.close();
 }

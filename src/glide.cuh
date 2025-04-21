@@ -26,11 +26,9 @@ public:
                std::optional<raft::device_matrix<float>> &d_reorder_data,
                std::string result_file);
 
-    void search(SearchParameter &param,
-                raft::device_matrix_view<float> d_query_view,
-                raft::host_matrix_view<uint32_t> h_result_id_view,
-                raft::host_matrix_view<float> h_result_dist_view,
-                std::string &result_file);
+    void search(SearchParameter &param, raft::device_matrix_view<float> d_query_view,
+                raft::host_matrix<uint32_t> &result_ids,
+                raft::host_matrix<float> &result_distances, std::string result_file);
 
     inline uint32_t dim() {
         return (d_data.data_handle() != nullptr) ? d_data.extent(1) : 0;
@@ -79,7 +77,7 @@ protected:
     void refine(SearchParameter &param, float relaxant_factor, float &build_time);
 
     void subgraph_build_and_merge(SearchParameter &param, float relaxant_factor,
-                                  raft::device_matrix_view<float> d_reorder_data,
+                                  raft::device_matrix_view<float> d_reorder_data_view,
                                   raft::device_vector_view<uint32_t> d_map_view,
                                   raft::device_vector_view<uint32_t> d_segment_start_view,
                                   raft::device_vector_view<uint32_t> d_segment_length_view,

@@ -3,12 +3,12 @@
 #include <fstream>
 
 int main(int argc, char **argv) {
-    if (argc != 11) {
-        std::cout << argv[0]
-                  << "preprocess_file knn_file graph_base_file result_file metric graph_degree knn_degree relaxant_factor beam refine_beam"
-                  << std::endl;
-        exit(-1);
-    }
+//    if (argc != 11) {
+//        std::cout << argv[0]
+//                  << "preprocess_file knn_file graph_base_file result_file metric graph_degree knn_degree relaxant_factor beam refine_beam"
+//                  << std::endl;
+//        exit(-1);
+//    }
 
     cudaSetDevice(1);
     raft::device_resources handle;
@@ -60,10 +60,10 @@ int main(int argc, char **argv) {
                                                                             search_param_refine.hash_max_fill_rate,
                                                                             search_param_refine.hash_bit);
 
-    auto knn_graph = load_graph<uint32_t, uint64_t>(knn_file);
+    auto knn_graph = load_graph_large(knn_file);
 
-    GLIDE_for_large index(handle, build_param.graph_degree, build_param.metric,
-                          reorder_file, map_file, centroid_file, segment_file);
+    GLIDE_large index(handle, build_param.graph_degree, build_param.metric,
+              reorder_file, map_file, centroid_file, segment_file);
 
     std::ofstream result_out;
     result_out.open(result_file, std::ios::app);
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     index.build(build_param, search_param_knn, search_param_refine, knn_graph.view(), result_file);
 
     std::ofstream out(graph_file, std::ios::binary);
-    uint32_t number = index.num();
+    uint32_t number = index.number();
     uint32_t degree = index.graph_degree();
     out.write(reinterpret_cast<const char *>(&number), sizeof(uint32_t));
     out.write(reinterpret_cast<const char *>(&degree), sizeof(uint32_t));

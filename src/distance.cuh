@@ -58,33 +58,3 @@ __device__ void sort_with_key_value(uint32_t number, uint32_t work_warp_id,
         }
     }
 }
-
-template<uint32_t MAX_NUMBER, typename Key_t>
-__device__ void sort_with_key(uint32_t number, uint32_t work_warp_id, Key_t *key_buffer) {
-    uint32_t lane_id = threadIdx.x % warpSize;
-    uint32_t warp_id = threadIdx.x / warpSize;
-
-    if (warp_id != work_warp_id) {
-        return;
-    }
-    constexpr uint32_t N = (MAX_NUMBER + 31) / 32;
-    Key_t keys[N];
-    Key_t vals[N];
-    for (uint32_t i = 0; i < N; i++) {
-        uint32_t j = lane_id + (32 * i);
-
-        Key_t key = (j < number) ? key_buffer[j] : get_max_value<Key_t>();
-
-        keys[i] = key;
-        vals[i] = key;
-    }
-
-    bitonic::warp_sort<Key_t, Key_t, N>(keys, vals);
-
-    for (uint32_t i = 0; i < N; i++) {
-        uint32_t j = (N * lane_id) + i;
-        if (j < number) {
-            key_buffer[j] = keys[i];
-        }
-    }
-}

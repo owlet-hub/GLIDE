@@ -4,74 +4,81 @@
 #include "raft/core/host_mdarray.hpp"
 #include "params.cuh"
 
-struct GLIDE_for_large {
+struct GLIDE_large {
 public:
-    GLIDE_for_large(raft::device_resources &handle, uint32_t graph_degree, Metric metric,
+    GLIDE_large(raft::device_resources &handle, uint32_t segment, uint32_t number, uint32_t graph_degree, Metric metric,
+        raft::host_matrix<uint8_t, uint64_t> h_reorder_data,
+        raft::host_vector<uint32_t> h_mapping,
+        raft::host_matrix<float> h_centroids,
+        raft::host_vector<uint32_t> h_segment_start,
+        raft::host_vector<uint32_t> h_segment_length);
+
+    GLIDE_large(raft::device_resources &handle, uint32_t graph_degree, Metric metric,
         std::string reorder_file, std::string map_file, std::string centroid_file, std::string segment_file);
 
-    GLIDE_for_large(raft::device_resources &handle, Metric metric,
+    GLIDE_large(raft::device_resources &handle, Metric metric,
         std::string reorder_file, std::string map_file, std::string centroid_file,
         std::string segment_file, std::string start_point_file, std::string graph_file);
 
     void load(raft::host_matrix_view<uint32_t, uint64_t> h_graph_view,
               raft::host_vector_view<uint32_t> h_start_point_view);
 
-    ~GLIDE_for_large() = default;
+    ~GLIDE_large() = default;
 
     void build(IndexParameter &build_param, SearchParameter &search_param_knn, SearchParameter &search_param_refine,
                raft::host_matrix_view<uint32_t, uint64_t> h_knn_graph_view, std::string &result_file);
 
     void search(SearchParameter &param, uint32_t min_segment_num, float boundary_factor,
                 raft::device_matrix_view<uint8_t> d_query_view,
-                raft::host_matrix_view<uint32_t> h_result_id_view,
-                raft::host_matrix_view<float> h_result_dist_view,
+                raft::host_matrix_view<uint32_t> h_result_ids_view,
+                raft::host_matrix_view<float> h_result_distances_view,
                 std::string &result_file);
 
-    inline uint32_t dim() {
+    uint32_t dim() {
         return (data.data_handle() != nullptr) ? data.extent(1) : 0;
     }
 
-    inline uint32_t num() {
+    uint32_t number() {
         return (data.data_handle() != nullptr) ? data.extent(0) : 0;
     }
 
-    inline uint32_t graph_degree() {
+    uint32_t graph_degree() {
         return (graph.data_handle() != nullptr) ? graph.extent(1) : 0;
     }
 
-    inline uint32_t segment_num() {
+    uint32_t segment() {
         return (segment_start.data_handle() != nullptr) ? segment_start.extent(0) : 0;
     }
 
-    inline uint32_t start_point_num() {
-        return (start_points.data_handle() != nullptr) ? start_points.extent(0) : 0;
+    uint32_t start_point_num() {
+        return (start_point.data_handle() != nullptr) ? start_point.extent(0) : 0;
     }
 
-    inline uint32_t centroid_num() {
+    uint32_t centroids_num() {
         return (centroids.data_handle() != nullptr) ? centroids.extent(0) : 0;
     }
 
-    inline raft::host_matrix_view<const uint8_t, uint64_t> data_view() {
+    raft::host_matrix_view<const uint8_t, uint64_t> data_view() {
         return data.view();
     }
 
-    inline raft::host_vector_view<const uint32_t> start_point_view() {
-        return start_points.view();
+    raft::host_vector_view<const uint32_t> start_point_view() {
+        return start_point.view();
     }
 
-    inline raft::host_matrix_view<const uint32_t, uint64_t> graph_view() {
+    raft::host_matrix_view<const uint32_t, uint64_t> graph_view() {
         return graph.view();
     }
 
-    inline raft::host_vector_view<const uint32_t> segment_start_view() {
+    raft::host_vector_view<const uint32_t> segment_start_view() {
         return segment_start.view();
     }
 
-    inline raft::host_vector_view<const uint32_t> segment_length_view() {
+    raft::host_vector_view<const uint32_t> segment_length_view() {
         return segment_length.view();
     }
 
-    inline raft::host_matrix_view<const float> centroids_view() {
+    raft::host_matrix_view<const float> centroids_view() {
         return centroids.view();
     }
 
@@ -90,10 +97,10 @@ private:
 
     Metric metric;
     raft::host_matrix<uint8_t, uint64_t> data;
-    raft::host_vector<uint32_t> map;
+    raft::host_vector<uint32_t> mapping;
     raft::host_matrix<float> centroids;
     raft::host_vector<uint32_t> segment_start;
     raft::host_vector<uint32_t> segment_length;
-    raft::host_vector<uint32_t> start_points;
+    raft::host_vector<uint32_t> start_point;
     raft::host_matrix<uint32_t, uint64_t> graph;
 };
