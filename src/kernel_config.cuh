@@ -5,15 +5,6 @@
 #include "graph_kernel.cuh"
 #include "search_kernel.cuh"
 
-uint32_t set_dataset_block_dim(uint32_t dim) {
-    constexpr uint32_t max_dataset_block_dim = 512;
-    uint32_t dataset_block_dim = 128;
-    while (dataset_block_dim < dim && dataset_block_dim < max_dataset_block_dim) {
-        dataset_block_dim *= 2;
-    }
-    return dataset_block_dim;
-}
-
 inline
 uint32_t set_block_size(raft::resources const &handle, uint32_t graph_degree,
                         uint32_t thread_block_size, uint32_t shared_mem_size, uint32_t max_jobs) {

@@ -145,7 +145,7 @@ reorder_kernel(float *data, float *reorder_data, uint32_t *segment_indexes, uint
         map[reorder_id] = point_id;
     }
 
-    if (boundary_index != uint32_t_max()) {
+    if (boundary_index != get_max_value<uint32_t>()) {
         uint32_t boundary_id = num + boundary_index;
         for (uint32_t i = threadIdx.x; i < dim; i += blockDim.x) {
             reorder_data[boundary_id * dim + i] = data[point_id * dim + i];

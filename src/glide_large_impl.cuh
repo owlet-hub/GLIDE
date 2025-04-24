@@ -187,7 +187,7 @@ GLIDE_large::reverse_graph(float &build_time) {
         thrust::fill(thrust::device.on(raft::resource::get_stream_from_stream_pool(handle)),
                      d_reverse_graph.data_handle(),
                      d_reverse_graph.data_handle() + graph_length,
-                     0xffffffffu);
+                     get_max_value<uint32_t>());
         thrust::fill(thrust::device.on(raft::resource::get_stream_from_stream_pool(handle)),
                      d_reverse_graph_degree.data_handle(),
                      d_reverse_graph_degree.data_handle() + length,
@@ -362,9 +362,9 @@ GLIDE_large::search(SearchParameter &param, uint32_t min_segment_num, float boun
     auto d_segment_ids = raft::make_device_matrix<uint32_t>(handle, query_number, centroids_num());
 
     thrust::fill(thrust::device, d_final_result_ids.data_handle(),
-                 d_final_result_ids.data_handle() + d_final_result_ids.size(), uint32_t_max());
+                 d_final_result_ids.data_handle() + d_final_result_ids.size(), get_max_value<uint32_t>());
     thrust::fill(thrust::device, d_final_result_distances.data_handle(),
-                 d_final_result_distances.data_handle() + d_final_result_distances.size(), FLT_MAX);
+                 d_final_result_distances.data_handle() + d_final_result_distances.size(), get_max_value<float>());
 
     cudaDeviceProp deviceProp = raft::resource::get_device_properties(handle);
     uint32_t max_grid_size = deviceProp.maxGridSize[1];

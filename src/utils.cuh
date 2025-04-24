@@ -11,8 +11,6 @@ __host__ __device__ constexpr inline uint32_t warp_size() { return 32; }
 
 __host__ __device__ constexpr inline uint32_t warp_full_mask() { return 0xffffffff; }
 
-__host__ __device__ constexpr inline uint32_t uint32_t_max() { return 0xffffffffu; }
-
 __host__ __device__ inline uint32_t xorshift32(uint32_t u) {
     u ^= u >> 13;
     u ^= u << 27;
