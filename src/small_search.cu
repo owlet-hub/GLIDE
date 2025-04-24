@@ -60,7 +60,7 @@ int main(int argc, char **argv) {
     auto data = load_data<float, uint32_t>(data_file);
     auto query = load_data<float, uint32_t>(query_file);
     auto truth = load_data<uint32_t, uint32_t>(truth_file);
-    auto graph = load_graph<uint32_t, uint32_t>(graph_file);
+    auto graph = load_data<uint32_t, uint32_t>(graph_file);
     auto start_point = load_start_point(start_point_file);
     auto centroids = load_data<float, uint32_t>(centroid_file);
 

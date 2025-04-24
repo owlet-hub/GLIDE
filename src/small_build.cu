@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
     auto h_segment_length = load_segment_length(segment_file);
     auto h_map = load_map(map_file);
     auto h_reorder_data = load_data<float, uint32_t>(reorder_file);
-    auto h_knn_graph = load_graph<uint32_t, uint32_t>(knn_file);
+    auto h_knn_graph = load_data<uint32_t, uint32_t>(knn_file);
 
     std::optional<raft::device_matrix<float>> d_reorder_data;
     std::optional<raft::device_vector<uint32_t>> d_map;
@@ -96,11 +96,11 @@ int main(int argc, char **argv) {
 
     std::ofstream result_out;
     result_out.open(result_file, std::ios::app);
-    result_out << build_param.graph_degree <<",";
+    result_out << build_param.graph_degree << ",";
     result_out.close();
 
     index.build(build_param, search_param_knn, search_param_refine, d_knn_graph, d_segment_start, d_segment_length,
-                d_map, h_segment_start.view(), h_segment_length.view(), h_map.view(),d_reorder_data,
+                d_map, h_segment_start.view(), h_segment_length.view(), h_map.view(), d_reorder_data,
                 result_file);
 
     uint32_t num = index.num();
@@ -124,6 +124,7 @@ int main(int argc, char **argv) {
     std::ofstream start_point_out(start_point_file, std::ios::binary);
     uint32_t start_point_size = index.start_point_num();
     start_point_out.write(reinterpret_cast<const char *>(&start_point_size), sizeof(uint32_t));
-    start_point_out.write(reinterpret_cast<const char *>(start_point.data_handle()), start_point_size * sizeof(uint32_t));
+    start_point_out.write(reinterpret_cast<const char *>(start_point.data_handle()),
+                          start_point_size * sizeof(uint32_t));
     start_point_out.close();
 }

@@ -19,9 +19,9 @@ __device__ inline float compute_similarity_warp(const Value1_t *point_1, const V
     for (uint32_t offset = warpSize / 2; offset > 0; offset >>= 1) {
         dist += __shfl_down_sync(0xffffffff, dist, offset);
     }
-    if(metric == Metric::Euclidean){
+    if (metric == Metric::Euclidean) {
         return sqrt(dist);
-    }else if(metric == Metric::Cosine){
+    } else if (metric == Metric::Cosine) {
         return dist;
     }
 }

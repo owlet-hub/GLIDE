@@ -7,7 +7,7 @@
 #pragma once
 
 template<uint32_t MAX_CANDIDATE>
-__device__ void 
+__device__ void
 sort_for_candidate(float *candidate_dist_buffer, uint32_t *candidate_id_buffer, uint32_t graph_degree,
                    uint32_t beam, uint32_t multi_warps = 0) {
     uint32_t lane_id = threadIdx.x % warpSize;
@@ -95,7 +95,7 @@ sort_for_candidate(float *candidate_dist_buffer, uint32_t *candidate_id_buffer, 
 }
 
 template<uint32_t MAX_BEAM>
-__device__ void 
+__device__ void
 sort_for_beam(float *beam_dist_buffer, uint32_t *beam_id_buffer, uint32_t beam, float *candidate_dist_buffer,
               uint32_t *candidate_id_buffer, uint32_t graph_degree, uint32_t *workspace_buffer,
               const bool first, uint32_t multi_warps = 0) {
@@ -112,9 +112,9 @@ sort_for_beam(float *beam_dist_buffer, uint32_t *beam_id_buffer, uint32_t beam, 
         if (first) {
             for (uint32_t i = lane_id; i < beam; i += warpSize) {
                 beam_dist_buffer[swizzling(i)] = (i < graph_degree) ?
-                        candidate_dist_buffer[swizzling(i)] : get_max_value<float>();
+                                                 candidate_dist_buffer[swizzling(i)] : get_max_value<float>();
                 beam_id_buffer[swizzling(i)] = (i < graph_degree) ?
-                        candidate_id_buffer[swizzling(i)] : get_max_value<uint32_t>();
+                                               candidate_id_buffer[swizzling(i)] : get_max_value<uint32_t>();
             }
         } else {
             for (uint32_t i = 0; i < N; i++) {
@@ -155,9 +155,9 @@ sort_for_beam(float *beam_dist_buffer, uint32_t *beam_id_buffer, uint32_t beam, 
             if (warp_id < 2) {
                 for (uint32_t i = threadIdx.x; i < beam; i += 2 * warpSize) {
                     beam_dist_buffer[swizzling(i)] = (i < graph_degree) ?
-                            candidate_dist_buffer[swizzling(i)] : get_max_value<float>();
+                                                     candidate_dist_buffer[swizzling(i)] : get_max_value<float>();
                     beam_id_buffer[swizzling(i)] = (i < graph_degree) ?
-                            candidate_id_buffer[swizzling(i)] : get_max_value<uint32_t>();
+                                                   candidate_id_buffer[swizzling(i)] : get_max_value<uint32_t>();
                 }
             }
             __syncthreads();
@@ -234,22 +234,22 @@ sort_for_beam(float *beam_dist_buffer, uint32_t *beam_id_buffer, uint32_t beam, 
 }
 
 template<uint32_t MAX_BEAM, uint32_t MAX_CANDIDATE>
-__device__ void 
+__device__ void
 update_result_buffer(float *beam_dist_buffer, uint32_t *beam_id_buffer, uint32_t beam, float *candidate_dist_buffer,
                      uint32_t *candidate_id_buffer, uint32_t graph_degree, uint32_t *workspace_buffer,
                      const bool first, const uint32_t multi_warps_1, const uint32_t multi_warps_2) {
     sort_for_candidate<MAX_CANDIDATE>(candidate_dist_buffer, candidate_id_buffer,
-                                               graph_degree, beam, multi_warps_1);
+                                      graph_degree, beam, multi_warps_1);
 
     sort_for_beam<MAX_BEAM>(beam_dist_buffer, beam_id_buffer, beam, candidate_dist_buffer,
-                                     candidate_id_buffer, graph_degree, workspace_buffer, first, multi_warps_2);
+                            candidate_id_buffer, graph_degree, workspace_buffer, first, multi_warps_2);
 }
 
 template<uint32_t MAX_CENTROID>
 __device__ void
 result_init(uint32_t *centroids_id_buffer, float *centroids_dist_buffer, uint32_t *candidate_id_buffer,
             float *candidate_dist_buffer, float *query_buffer, const float *data, const uint32_t *graph,
-            const uint32_t *start_points, const float* centroids, uint32_t dim, uint32_t graph_degree,
+            const uint32_t *start_points, const float *centroids, uint32_t dim, uint32_t graph_degree,
             uint32_t centroid_num, uint32_t *visited_hashmap, uint32_t hash_bit, Metric metric) {
     uint32_t warp_id = threadIdx.x / warpSize;
     uint32_t lane_id = threadIdx.x % warpSize;
@@ -267,7 +267,7 @@ result_init(uint32_t *centroids_id_buffer, float *centroids_dist_buffer, uint32_
     sort_with_key_value<MAX_CENTROID>(centroid_num, 0, centroids_id_buffer, centroids_dist_buffer);
     __syncthreads();
 
-    for(uint32_t neighbor_id=threadIdx.x; neighbor_id< graph_degree; neighbor_id+=blockDim.x){
+    for (uint32_t neighbor_id = threadIdx.x; neighbor_id < graph_degree; neighbor_id += blockDim.x) {
         uint32_t node_id = start_points[centroids_id_buffer[0]];
 
         uint32_t index = graph[node_id * graph_degree + neighbor_id];
@@ -281,8 +281,8 @@ result_init(uint32_t *centroids_id_buffer, float *centroids_dist_buffer, uint32_
         uint32_t index = candidate_id_buffer[neighbor_id];
 
         float dist = (index != get_max_value<uint32_t>()) ?
-                compute_similarity_warp(query_buffer, data + index * dim, dim, metric) : get_max_value<float>();
-        if(lane_id == 0){
+                     compute_similarity_warp(query_buffer, data + index * dim, dim, metric) : get_max_value<float>();
+        if (lane_id == 0) {
             candidate_dist_buffer[neighbor_id] = dist;
         }
     }
@@ -323,8 +323,8 @@ select_current_point(uint32_t *terminate_flag, uint32_t *select_buffer, uint32_t
     }
 }
 
-__device__ inline void 
-hashmap_restore(uint32_t * hashmap, size_t hash_bit, uint32_t *beam_id_buffer, uint32_t beam, uint32_t first_tid = 0){
+__device__ inline void
+hashmap_restore(uint32_t *hashmap, size_t hash_bit, uint32_t *beam_id_buffer, uint32_t beam, uint32_t first_tid = 0) {
     if (threadIdx.x < first_tid) return;
     for (unsigned i = threadIdx.x - first_tid; i < beam; i += blockDim.x - first_tid) {
         auto key = beam_id_buffer[i] & index_mask::clean;
@@ -332,7 +332,7 @@ hashmap_restore(uint32_t * hashmap, size_t hash_bit, uint32_t *beam_id_buffer, u
     }
 }
 
-__device__ void 
+__device__ void
 compute_distance(uint32_t *candidate_id_buffer, float *candidate_dist_buffer, float *query_buffer,
                  const uint32_t *graph, uint32_t graph_degree, uint32_t *visited_hashmap, uint32_t hash_bit,
                  uint32_t *select_buffer, uint32_t dim, const float *data, Metric metric) {
@@ -367,7 +367,7 @@ __global__ void
 search_kernel(uint32_t *result_ids, float *result_dists, uint32_t top_k, const float *data, const float *query,
               const uint32_t *graph, uint32_t graph_degree, uint32_t beam, uint32_t max_iterations,
               uint32_t min_iterations, uint32_t hash_bit, uint32_t hash_reset_interval, const uint32_t *start_points,
-              uint32_t dim, uint32_t centroid_num, const float* centroids, Metric metric) {
+              uint32_t dim, uint32_t centroid_num, const float *centroids, Metric metric) {
     uint32_t query_id = blockIdx.x;
 
     extern __shared__ uint32_t shared_mem[];
@@ -460,11 +460,10 @@ search_kernel(uint32_t *result_ids, float *result_dists, uint32_t top_k, const f
     }
 }
 
-__device__ void 
+__device__ void
 result_init_for_large(uint32_t *candidate_id_buffer, float *candidate_dist_buffer, uint8_t *query_buffer,
-                           const uint8_t *data, const uint32_t *graph, uint32_t start_points,
-                           uint32_t dim, uint32_t graph_degree, uint32_t *visited_hashmap, uint32_t hash_bit,
-                           Metric metric) {
+                      const uint8_t *data, const uint32_t *graph, uint32_t start_points, uint32_t dim,
+                      uint32_t graph_degree, uint32_t *visited_hashmap, uint32_t hash_bit, Metric metric) {
     for (uint32_t i = threadIdx.x; i < graph_degree; i += blockDim.x) {
         uint32_t index = graph[start_points * graph_degree + i];
         uint32_t flag = (index != get_max_value<uint32_t>()) ? hashmap::insert(visited_hashmap, hash_bit, index) : 0;
@@ -477,19 +476,18 @@ result_init_for_large(uint32_t *candidate_id_buffer, float *candidate_dist_buffe
     uint32_t warp_id = threadIdx.x / warpSize;
     for (uint32_t i = warp_id; i < graph_degree; i += warp_num) {
         uint32_t index = candidate_id_buffer[i];
-        float dist = (index != get_max_value<uint32_t>()) ? compute_similarity_warp(query_buffer, data + index * dim, dim, metric)
-                                               : get_max_value<float>();
+        float dist = (index != get_max_value<uint32_t>()) ?
+                     compute_similarity_warp(query_buffer, data + index * dim, dim, metric) : get_max_value<float>();
         if (lane_id == 0) {
             candidate_dist_buffer[i] = dist;
         }
     }
 }
 
-__device__ void 
+__device__ void
 compute_distance_for_large(uint32_t *candidate_id_buffer, float *candidate_dist_buffer, uint8_t *query_buffer,
-                                const uint32_t *graph, uint32_t graph_degree, uint32_t *visited_hashmap,
-                                uint32_t hash_bit, uint32_t *select_buffer,
-                                uint32_t dim, const uint8_t *data, Metric metric) {
+                           const uint32_t *graph, uint32_t graph_degree, uint32_t *visited_hashmap, uint32_t hash_bit,
+                           uint32_t *select_buffer, uint32_t dim, const uint8_t *data, Metric metric) {
     for (uint32_t i = threadIdx.x; i < graph_degree; i += blockDim.x) {
         uint32_t neighbor_id = get_max_value<uint32_t>();
         const auto current_point_id = select_buffer[0];
@@ -509,8 +507,7 @@ compute_distance_for_large(uint32_t *candidate_id_buffer, float *candidate_dist_
         uint32_t index = candidate_id_buffer[i];
 
         float dist = (index != get_max_value<uint32_t>()) ?
-                     compute_similarity_warp(query_buffer, data + index * dim, dim, metric) :
-                     get_max_value<float>();
+                     compute_similarity_warp(query_buffer, data + index * dim, dim, metric) : get_max_value<float>();
         if (lane_id == 0) {
             candidate_dist_buffer[i] = dist;
         }
@@ -528,56 +525,50 @@ select_segment_kernel(uint32_t *result_ids, const uint8_t *query, const float *c
 
     extern __shared__ uint32_t shared_mem[];
 
-    uint32_t query_buffer_size = dim;
-
     auto *query_buffer = reinterpret_cast<uint8_t *>(shared_mem);
     auto *centroids_id_buffer = reinterpret_cast<uint32_t *>(query_buffer + dim);
-    auto *centroids_distance_buffer = reinterpret_cast<float *>(centroids_id_buffer + centroid_num);
+    auto *centroids_dist_buffer = reinterpret_cast<float *>(centroids_id_buffer + centroid_num);
 
-    for (uint32_t i = threadIdx.x; i < query_buffer_size; i += blockDim.x) {
-        if (i < dim) {
-            query_buffer[i] = query[query_id * dim + i];
-        } else {
-            query_buffer[i] = 0;
-        }
+    for (uint32_t i = threadIdx.x; i < dim; i += blockDim.x) {
+        query_buffer[i] = query[query_id * dim + i];
     }
-    for(uint32_t i=threadIdx.x;i<centroid_num;i+=blockDim.x){
-        result_ids[i]=get_max_value<uint32_t>();
+    for (uint32_t i = threadIdx.x; i < centroid_num; i += blockDim.x) {
+        result_ids[i] = get_max_value<uint32_t>();
     }
     __syncthreads();
 
-    for(uint32_t i=warp_id;i<centroid_num;i+=warp_num){
+    for (uint32_t i = warp_id; i < centroid_num; i += warp_num) {
         float dist = compute_similarity_warp(query_buffer, centroids + i * dim, dim, metric);
-        if(lane_id == 0){
+        if (lane_id == 0) {
             centroids_id_buffer[i] = i;
-            centroids_distance_buffer[i] = dist;
+            centroids_dist_buffer[i] = dist;
         }
     }
     __syncthreads();
 
-sort_with_key_value<MAX_CENTROID>(centroid_num, 0, centroids_id_buffer, centroids_distance_buffer);
+    sort_with_key_value<MAX_CENTROID>(centroid_num, 0, centroids_id_buffer, centroids_dist_buffer);
     __syncthreads();
 
     if (warp_id == 0) {
-        uint32_t num_allow = 0;
+        uint32_t allow_num = 0;
         for (uint32_t i = lane_id; i < roundUp32(centroid_num); i += warpSize) {
 
-            uint32_t allow = (i < centroid_num && (centroids_distance_buffer[i] / centroids_distance_buffer[0] <= boundary_factor)) ? 1 : 0;
+            uint32_t allow = (i < centroid_num &&
+                              (centroids_dist_buffer[i] / centroids_dist_buffer[0] <= boundary_factor)) ? 1 : 0;
             const uint32_t ballot_mask = __ballot_sync(0xffffffff, allow);
 
             if (allow) {
-//                const auto j = __popc(ballot_mask & ((1 << lane_id) - 1)) + num_allow;
-                uint32_t result_index = (centroid_num * query_id)+i;
+                uint32_t result_index = (centroid_num * query_id) + i;
                 result_ids[result_index] = centroids_id_buffer[i];
             }
-            num_allow += __popc(ballot_mask);
+            allow_num += __popc(ballot_mask);
         }
 
-        if(num_allow < min_segment_num){
-            uint32_t need = min_segment_num - num_allow;
-            for(uint32_t i = lane_id; i<need;i+=warpSize){
-                uint32_t index = num_allow + i;
-                uint32_t result_index = (centroid_num * query_id) + num_allow + i;
+        if (allow_num < min_segment_num) {
+            uint32_t need = min_segment_num - allow_num;
+            for (uint32_t i = lane_id; i < need; i += warpSize) {
+                uint32_t index = allow_num + i;
+                uint32_t result_index = (centroid_num * query_id) + allow_num + i;
                 result_ids[result_index] = centroids_id_buffer[index];
             }
         }
@@ -587,13 +578,13 @@ sort_with_key_value<MAX_CENTROID>(centroid_num, 0, centroids_id_buffer, centroid
 }
 
 template<unsigned MAX_TOPK>
-__device__
-void result_merge(float *final_result_dists, uint32_t *final_result_ids,
-                  float *result_dists, uint32_t *result_ids, uint32_t *map, uint32_t top_k){
+__device__ void
+result_merge(float *final_result_dists, uint32_t *final_result_ids, float *result_dists, uint32_t *result_ids,
+             uint32_t *map, uint32_t top_k) {
     uint32_t lane_id = threadIdx.x % warpSize;
     uint32_t warp_id = threadIdx.x / warpSize;
 
-    if(warp_id>0){
+    if (warp_id > 0) {
         return;
     }
 
@@ -654,21 +645,21 @@ search_on_sub_kernel(uint32_t *final_result_ids, float *final_result_dists, uint
     auto *visited_hashmap = reinterpret_cast<uint32_t *>(terminate_flag + 1);
     auto *is_search = reinterpret_cast<uint32_t *>(visited_hashmap + hashmap::get_size(hash_bit));
 
-    if(threadIdx.x==0){
+    if (threadIdx.x == 0) {
         is_search[0] = 0;
-        for(uint32_t i=0;i<segment;i++){
-            if(segment_ids[query_id*segment+i] == segment_id){
+        for (uint32_t i = 0; i < segment; i++) {
+            if (segment_ids[query_id * segment + i] == segment_id) {
                 is_search[0] = 1;
                 break;
             }
-            if(segment_ids[query_id*segment+i] == get_max_value<uint32_t>()){
+            if (segment_ids[query_id * segment + i] == get_max_value<uint32_t>()) {
                 break;
             }
         }
     }
     __syncthreads();
 
-    if(is_search[0] == 0){
+    if (is_search[0] == 0) {
         return;
     }
 
@@ -695,9 +686,8 @@ search_on_sub_kernel(uint32_t *final_result_ids, float *final_result_dists, uint
     const uint32_t multi_warps_2 = ((blockDim.x >= 64) && (MAX_BEAM > 256)) ? 1 : 0;
     while (true) {
         update_result_buffer<MAX_BEAM, MAX_CANDIDATE>(result_dist_buffer, result_id_buffer, beam,
-                                                     result_dist_buffer + beam,
-                                                     result_id_buffer + beam, graph_degree,
-                                                     workspace_buffer, (iter == 0), multi_warps_1, multi_warps_2);
+                                                      result_dist_buffer + beam, result_id_buffer + beam, graph_degree,
+                                                      workspace_buffer, (iter == 0), multi_warps_1, multi_warps_2);
 
         if ((iter + 1) % hash_reset_interval == 0) {
             unsigned hash_start_tid;
@@ -738,13 +728,12 @@ search_on_sub_kernel(uint32_t *final_result_ids, float *final_result_dists, uint
         }
 
         compute_distance_for_large(result_id_buffer + beam, result_dist_buffer + beam, query_buffer, graph,
-                                   graph_degree, visited_hashmap, hash_bit, select_buffer,
-                                   dim, data, metric);
+                                   graph_degree, visited_hashmap, hash_bit, select_buffer, dim, data, metric);
         __syncthreads();
 
         iter++;
     }
 
-    result_merge<MAX_TOPK>(final_result_dists + query_id*top_k, final_result_ids + query_id*top_k,
+    result_merge<MAX_TOPK>(final_result_dists + query_id * top_k, final_result_ids + query_id * top_k,
                            result_dist_buffer, result_id_buffer, map, top_k);
 }

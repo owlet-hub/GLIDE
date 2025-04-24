@@ -18,15 +18,15 @@ sample_kernel(const float *data, float *sample_data, uint32_t *sample_ids, uint3
 }
 
 __global__ void
-sample_for_large_dataset_kernel(const uint8_t *data, float *sample_data, uint32_t *sample_ids, uint32_t dim,
-                                uint32_t sample_num, uint32_t start_id, uint32_t batch_size) {
+sample_for_large_kernel(const uint8_t *data, float *sample_data, uint32_t *sample_ids, uint32_t dim,
+                        uint32_t sample_num, uint32_t start_id, uint32_t batch_size) {
     uint32_t point_id = blockIdx.x;
     if (point_id >= sample_num) {
         return;
     }
 
     int sample_id = sample_ids[point_id] - start_id;
-    if(sample_id < 0 || sample_id >= batch_size){
+    if (sample_id < 0 || sample_id >= batch_size) {
         return;
     }
 
@@ -60,7 +60,7 @@ define_partition_kernel(const float *data, float *centroids, uint32_t num, uint3
 
     for (uint32_t i = warp_id; i < centroid_num; i += warp_num) {
         float dist = compute_similarity_warp(point_buffer, centroids + i * dim, dim, metric);
-        if(lane_id == 0){
+        if (lane_id == 0) {
             centroid_dist_buffer[i] = dist;
             centroid_id_buffer[i] = i;
         }
@@ -71,7 +71,8 @@ define_partition_kernel(const float *data, float *centroids, uint32_t num, uint3
 
     if (threadIdx.x == 0) {
         uint32_t segment_index = atomicAdd(segment_lengths + centroid_id_buffer[0], 1);
-        uint32_t boundary_index = (centroid_num > 1 && centroid_dist_buffer[1] / centroid_dist_buffer[0] <= boundary_fact)
+        uint32_t boundary_index = (centroid_num > 1 &&
+                                   centroid_dist_buffer[1] / centroid_dist_buffer[0] <= boundary_fact)
                                   ? atomicAdd(segment_lengths + centroid_num, 1) : get_max_value<uint32_t>();
 
         segment_indexes[point_id * 3] = centroid_id_buffer[0];
@@ -82,9 +83,9 @@ define_partition_kernel(const float *data, float *centroids, uint32_t num, uint3
 
 template<uint32_t MAX_CENTROIDS>
 __global__ void
-define_partition_for_large_dataset_kernel(const uint8_t *data, float *centroids, uint32_t batch_size, uint32_t dim,
-                                          uint32_t centroid_num, uint32_t *segment_lengths, uint32_t *segment_indexes,
-                                          Metric metric) {
+define_partition_for_large_kernel(const uint8_t *data, float *centroids, uint32_t batch_size, uint32_t dim,
+                                  uint32_t centroid_num, uint32_t *segment_lengths, uint32_t *segment_indexes,
+                                  Metric metric) {
     uint32_t point_id = blockIdx.x;
     if (point_id >= batch_size) {
         return;
@@ -107,7 +108,7 @@ define_partition_for_large_dataset_kernel(const uint8_t *data, float *centroids,
 
     for (uint32_t i = warp_id; i < centroid_num; i += warp_num) {
         float dist = compute_similarity_warp(point_buffer, centroids + i * dim, dim, metric);
-        if(lane_id == 0){
+        if (lane_id == 0) {
             centroid_dist_buffer[i] = dist;
             centroid_id_buffer[i] = i;
         }
@@ -156,8 +157,9 @@ reorder_kernel(float *data, float *reorder_data, uint32_t *segment_indexes, uint
 }
 
 __global__ void
-reorder_for_large_dataset_kernel(uint8_t *data, uint8_t *reorder_data, uint32_t *segment_indexes, uint32_t *map,
-                                 uint32_t batch_size, uint32_t dim, uint32_t target_segment_id, uint32_t *d_counts, uint32_t offset) {
+reorder_for_large_kernel(uint8_t *data, uint8_t *reorder_data, uint32_t *segment_indexes, uint32_t *map,
+                         uint32_t batch_size, uint32_t dim, uint32_t target_segment_id, uint32_t *d_counts,
+                         uint32_t offset) {
     uint32_t point_id = blockIdx.x;
     if (point_id >= batch_size) {
         return;
@@ -167,17 +169,18 @@ reorder_for_large_dataset_kernel(uint8_t *data, uint8_t *reorder_data, uint32_t 
     auto *segment_index = reinterpret_cast<uint32_t *>(shared_mem);
 
     uint32_t segment_id = segment_indexes[point_id];
-    if(segment_id != target_segment_id){
+    if (segment_id != target_segment_id) {
         return;
     }
 
-    if(threadIdx.x == 0){
+    if (threadIdx.x == 0) {
         segment_index[0] = atomicAdd(d_counts + segment_id, 1);
     }
     __syncthreads();
 
     for (uint32_t i = threadIdx.x; i < dim; i += blockDim.x) {
-        reorder_data[static_cast<uint64_t>(segment_index[0]) * dim + i] = data[static_cast<uint64_t>(point_id) * dim + i];
+        reorder_data[static_cast<uint64_t>(segment_index[0]) * dim + i] =
+                data[static_cast<uint64_t>(point_id) * dim + i];
     }
     if (threadIdx.x == 0) {
         map[segment_index[0]] = point_id + offset;

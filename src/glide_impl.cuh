@@ -18,7 +18,8 @@ GLIDE::GLIDE(raft::device_resources &handle, uint32_t graph_degree,
         : handle(handle),
           metric(metric),
           d_graph{raft::make_device_matrix<uint32_t, uint32_t, raft::row_major>(handle, num(), graph_degree)},
-          d_data{raft::make_device_matrix<float, uint32_t, raft::row_major>(handle, h_data.extent(0), h_data.extent(1))},
+          d_data{raft::make_device_matrix<float, uint32_t, raft::row_major>(handle, h_data.extent(0),
+                                                                            h_data.extent(1))},
           d_centroids{raft::make_device_matrix<float, uint32_t, raft::row_major>(handle, h_centroids.extent(0),
                                                                                  h_centroids.extent(1))} {
     raft::copy(d_data.data_handle(), h_data.data_handle(),
@@ -347,7 +348,7 @@ GLIDE::build(IndexParameter &build_param, SearchParameter &search_param_knn, Sea
 
     reverse_graph(build_time);
 
-    if(search_param_refine.beam != 0) {
+    if (search_param_refine.beam != 0) {
         refine(search_param_refine, build_param.relaxant_factor, build_time);
     }
 

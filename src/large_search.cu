@@ -40,10 +40,10 @@ int main(int argc, char **argv) {
     raft::resource::set_cuda_stream_pool(handle, stream_pool);
 
     std::string preprocess_file(argv[1]);
-    std::string segment_file = preprocess_file+".segment";
-    std::string reorder_file = preprocess_file+".reorder";
+    std::string segment_file = preprocess_file + ".segment";
+    std::string reorder_file = preprocess_file + ".reorder";
     std::string map_file = preprocess_file + ".map";
-    std::string centroid_file = preprocess_file+".centroids";
+    std::string centroid_file = preprocess_file + ".centroids";
     std::string query_file(argv[2]);
     std::string truth_file(argv[3]);
     std::string graph_base_file(argv[4]);
@@ -65,12 +65,12 @@ int main(int argc, char **argv) {
     float boundary_factor = std::stof(argv[10]);
 
     std::ofstream result_out(result_file, std::ios::app);
-    result_out<<search_param.beam<<",";
+    result_out << search_param.beam << ",";
     result_out.close();
 
     GLIDE_large index(handle, index_metric,
-              reorder_file, map_file, centroid_file,
-              segment_file, start_point_file, graph_file);
+                      reorder_file, map_file, centroid_file,
+                      segment_file, start_point_file, graph_file);
 
     adjust_search_params(search_param.min_iterations, search_param.max_iterations, search_param.beam);
     search_param.hash_bit = calculate_hash_bitlen(search_param.beam, index.graph_degree(),
@@ -81,7 +81,10 @@ int main(int argc, char **argv) {
                                                                      search_param.hash_max_fill_rate,
                                                                      search_param.hash_bit);
 
-    auto d_query = load_query_uint8(query_file, handle);
+    auto query = load_data<uint8_t, uint32_t>(query_file);
+    auto d_query = raft::make_device_matrix<uint8_t, uint32_t>(handle, query.extent(0), query.extent(1));
+    raft::copy(d_query.data_handle(), query.data_handle(),
+               query.size(), raft::resource::get_stream_from_stream_pool(handle));
     auto result_ids = raft::make_host_matrix<uint32_t, uint32_t>(d_query.extent(0), search_param.topk);
     auto result_distances = raft::make_host_matrix<float, uint32_t>(d_query.extent(0), search_param.topk);
 

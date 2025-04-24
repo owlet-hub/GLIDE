@@ -40,15 +40,18 @@ __host__ __device__ inline T swizzling(T x) {
 
 template<typename Type>
 __host__ __device__ inline Type get_max_value();
-template <>
+
+template<>
 __host__ __device__ inline int get_max_value<int>() {
     return INT_MAX;
 };
-template <>
+
+template<>
 __host__ __device__ inline float get_max_value<float>() {
     return FLT_MAX;
 };
-template <>
+
+template<>
 __host__ __device__ inline uint32_t get_max_value<uint32_t>() {
     return 0xffffffffu;
 };

@@ -1837,41 +1837,6 @@ void GNND<Data_t, Index_t>::build(std::optional<raft::device_matrix<float>> &dat
     }
 }
 
-//raft::host_matrix<int> build_nnd(raft::resources const &handle, NNDescentParameter &param, IndexParameter &build_param,
-//                                 raft::device_matrix_view<float> d_reorder_data_view) {
-//    uint32_t intermediate_graph_degree = param.intermediate_graph_degree;
-//    uint32_t graph_degree = param.graph_degree;
-//    uint32_t number = d_reorder_data_view.extent(0);
-//    uint32_t dim = d_reorder_data_view.extent(1);
-//
-//    if (intermediate_graph_degree < graph_degree) {
-//        graph_degree = intermediate_graph_degree;
-//    }
-//
-//    uint32_t extended_graph_degree =
-//            roundUp32(static_cast<uint32_t>(graph_degree * (graph_degree <= 32 ? 1.0 : 1.3)));
-//    uint32_t extended_intermediate_graph_degree = roundUp32(
-//            static_cast<uint32_t>(intermediate_graph_degree * (intermediate_graph_degree <= 32 ? 1.0 : 1.3)));
-//
-//    auto nnd_graph = raft::make_host_matrix<int, uint32_t, raft::row_major>(number, extended_graph_degree);
-//
-//    BuildConfig build_config{.max_dataset_size      = number,
-//            .dataset_dim           = dim,
-//            .node_degree           = extended_graph_degree,
-//            .internal_node_degree  = extended_intermediate_graph_degree,
-//            .max_iterations        = param.max_iterations,
-//            .termination_threshold = param.termination_threshold,
-//            .segment_num           = build_param.segment_start_view.extent(0),
-//            .segment_length        = build_param.segment_length_view.data_handle()};
-//
-//    GNND<float, int> nnd(handle, build_config);
-//
-//    nnd.build(d_reorder_data_view, number, nnd_graph.data_handle(), graph_degree,
-//              build_param.segment_start_view, build_param.segment_length_view);
-//
-//    return nnd_graph;
-//}
-
 raft::host_matrix<int>
 build_nnd(raft::resources const &handle, NNDescentParameter &param,
           std::optional<raft::device_matrix<float>> &d_data,
@@ -1968,14 +1933,14 @@ build_nnd(raft::resources const &handle, NNDescentParameter &param,
 //}
 
 raft::host_matrix<int, uint64_t>
-build_knn_for_large_dataset(raft::resources const &handle, uint32_t knn_degree,
-                            raft::host_vector_view<uint32_t> segment_start_view,
-                            raft::host_vector_view<uint32_t> segment_length_view,
-                            raft::host_matrix_view<uint8_t, uint64_t> reorder_data_view, std::string &result_file) {
+build_knn_for_large(raft::resources const &handle, uint32_t knn_degree,
+                    raft::host_vector_view<uint32_t> h_segment_start_view,
+                    raft::host_vector_view<uint32_t> h_segment_length_view,
+                    raft::host_matrix_view<uint8_t, uint64_t> h_reorder_data_view, std::string &result_file) {
     using namespace cuvs::neighbors;
-    uint32_t segment = segment_start_view.extent(0);
-    uint32_t dim = reorder_data_view.extent(1);
-    uint32_t num = reorder_data_view.extent(0);
+    uint32_t segment = h_segment_start_view.extent(0);
+    uint32_t dim = h_reorder_data_view.extent(1);
+    uint32_t num = h_reorder_data_view.extent(0);
 
     cudaEvent_t start_time, stop_time;
     float milliseconds = 0.0f;
@@ -1986,8 +1951,8 @@ build_knn_for_large_dataset(raft::resources const &handle, uint32_t knn_degree,
     auto knn_graph = raft::make_host_matrix<int, uint64_t>(num, knn_degree);
 
     for (uint32_t i = 0; i < segment; i++) {
-        uint32_t length = segment_length_view(i);
-        uint32_t start = segment_start_view(i);
+        uint32_t length = h_segment_length_view(i);
+        uint32_t start = h_segment_start_view(i);
 
         uint64_t data_start = static_cast<uint64_t>(start) * dim;
         uint64_t data_length = static_cast<uint64_t>(length) * dim;
@@ -1995,7 +1960,7 @@ build_knn_for_large_dataset(raft::resources const &handle, uint32_t knn_degree,
         uint64_t knn_length = static_cast<uint64_t>(length) * knn_degree;
 
         auto sub_dataset = raft::make_host_matrix<uint8_t, uint64_t>(length, dim);
-        raft::copy(sub_dataset.data_handle(), reorder_data_view.data_handle() + data_start, data_length,
+        raft::copy(sub_dataset.data_handle(), h_reorder_data_view.data_handle() + data_start, data_length,
                    raft::resource::get_cuda_stream(handle));
 
         raft::host_matrix_view<const uint8_t, uint64_t> data = sub_dataset.view();

@@ -5,7 +5,7 @@
 #include "params.cuh"
 #include "kernel_config.cuh"
 
-void 
+void
 get_centroids(raft::device_resources &handle,
               raft::device_matrix_view<float> d_data_view,
               raft::device_matrix_view<float, int> d_centroid_view,
@@ -47,7 +47,7 @@ get_centroids(raft::device_resources &handle,
     params.n_clusters = cluster_num;
     int iter;
     float inertia;
-    
+
     kmeans::fit(handle, params, d_sample_data.view(), std::nullopt, d_centroid_view,
                 raft::make_host_scalar_view(&inertia), raft::make_host_scalar_view(&iter));
     cudaEventRecord(stop_time);
@@ -56,7 +56,7 @@ get_centroids(raft::device_resources &handle,
     build_time += milliseconds / 1000.0f;
 }
 
-void 
+void
 define_partition(raft::device_resources &handle,
                  raft::device_matrix_view<float> d_data_view,
                  raft::device_matrix_view<float> d_centroid_view,
@@ -77,7 +77,7 @@ define_partition(raft::device_resources &handle,
     thrust::fill(thrust::device, d_segment_length.data_handle(),
                  d_segment_length.data_handle() + d_segment_length.size(), 0);
 
-    uint32_t shared_mem_size = dim  * sizeof(float) + centroid_num * sizeof(float) + centroid_num * sizeof(uint32_t);
+    uint32_t shared_mem_size = dim * sizeof(float) + centroid_num * sizeof(float) + centroid_num * sizeof(uint32_t);
     uint32_t threads_per_block = 256;
     uint32_t blocks_per_grid = num;
 
@@ -179,20 +179,20 @@ void preprocess(raft::device_resources &handle, PartitionParameter param,
     reorder(handle, d_data_view, d_map->view(), d_reorder_data->view(),
             h_segment_start_view, d_segment_index.view(), build_time);
 
-    std::cout<<"preprocessing time: "<<build_time<<" s"<<std::endl;
+    std::cout << "preprocessing time: " << build_time << " s" << std::endl;
     std::ofstream result_out(result_file, std::ios::app);
-    result_out << build_time <<",";
+    result_out << build_time << ",";
     result_out.close();
 }
 
-void get_centroids_for_large_dataset(raft::device_resources &handle,
-                                     raft::host_matrix_view<uint8_t, uint64_t> data_view,
-                                     raft::device_matrix_view<uint8_t, uint64_t> d_data_view,
-                                     raft::device_matrix_view<float, int> d_centroid_view,
-                                     uint32_t cluster_num, float sample_factor, uint32_t batch_num, float &build_time) {
+void get_centroids_for_large(raft::device_resources &handle,
+                             raft::host_matrix_view<uint8_t, uint64_t> h_data_view,
+                             raft::device_matrix_view<uint8_t, uint64_t> d_data_view,
+                             raft::device_matrix_view<float, int> d_centroid_view,
+                             uint32_t cluster_num, float sample_factor, uint32_t batch_num, float &build_time) {
     using namespace cuvs::cluster;
-    uint32_t num = data_view.extent(0);
-    uint32_t dim = data_view.extent(1);
+    uint32_t num = h_data_view.extent(0);
+    uint32_t dim = h_data_view.extent(1);
     int sample_num = num * sample_factor;
 
     cudaEvent_t start_time, stop_time;
@@ -214,7 +214,6 @@ void get_centroids_for_large_dataset(raft::device_resources &handle,
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
-    std::cout << "shuffle time: " << milliseconds / 1000.0f << " s" << std::endl;
 
     cudaDeviceProp deviceProp = raft::resource::get_device_properties(handle);
     uint32_t max_size = deviceProp.maxThreadsPerBlock;
@@ -225,21 +224,24 @@ void get_centroids_for_large_dataset(raft::device_resources &handle,
     float sampling_time = 0.0f;
     for (uint32_t i = 0; i < batch_num; i++) {
         uint32_t start_id = i * batch_size;
-        raft::copy(d_data_view.data_handle(), data_view.data_handle() + static_cast<uint64_t>(start_id) * dim,
-                   static_cast<uint64_t>(batch_size) * dim,
-                   raft::resource::get_cuda_stream(handle));
+        raft::copy(d_data_view.data_handle(), h_data_view.data_handle() + static_cast<uint64_t>(start_id) * dim,
+                   static_cast<uint64_t>(batch_size) * dim, raft::resource::get_cuda_stream(handle));
 
         cudaEventRecord(start_time);
-        sample_for_large_dataset_kernel<<<blocks_per_grid, threads_per_block>>>(
-                d_data_view.data_handle(), d_sample_data.data_handle(), d_indices.data_handle(), dim, sample_num,
-                start_id, batch_size);
+        sample_for_large_kernel<<<blocks_per_grid, threads_per_block>>>(
+                d_data_view.data_handle(),
+                d_sample_data.data_handle(),
+                d_indices.data_handle(),
+                dim,
+                sample_num,
+                start_id,
+                batch_size);
         cudaEventRecord(stop_time);
         cudaEventSynchronize(stop_time);
         cudaEventElapsedTime(&milliseconds, start_time, stop_time);
         sampling_time += milliseconds / 1000.0f;
     }
     build_time += sampling_time;
-    std::cout << "sampling time: " << sampling_time << " s" << std::endl;
 
     kmeans::params params;
     params.n_clusters = cluster_num;
@@ -253,20 +255,19 @@ void get_centroids_for_large_dataset(raft::device_resources &handle,
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
-    std::cout << "kmeans time: " << milliseconds / 1000.0f << " s" << std::endl;
 }
 
-void define_partition_for_large_dataset(raft::device_resources &handle,
-                                        raft::host_matrix_view<uint8_t, uint64_t> data_view,
-                                        raft::device_matrix_view<uint8_t, uint64_t> d_data_view,
-                                        raft::device_matrix_view<float, int> d_centroid_view,
-                                        raft::host_vector_view<uint32_t> segment_start_view,
-                                        raft::host_vector_view<uint32_t> segment_length_view,
-                                        raft::device_vector_view<uint32_t> d_segment_index_view,
-                                        uint32_t batch_num, Metric metric, float &build_time) {
+void define_partition_for_large(raft::device_resources &handle,
+                                raft::host_matrix_view<uint8_t, uint64_t> h_data_view,
+                                raft::device_matrix_view<uint8_t, uint64_t> d_data_view,
+                                raft::device_matrix_view<float, int> d_centroid_view,
+                                raft::host_vector_view<uint32_t> segment_start_view,
+                                raft::host_vector_view<uint32_t> segment_length_view,
+                                raft::device_vector_view<uint32_t> d_segment_index_view,
+                                uint32_t batch_num, Metric metric, float &build_time) {
     uint32_t centroid_num = d_centroid_view.extent(0);
-    uint32_t num = data_view.extent(0);
-    uint32_t dim = data_view.extent(1);
+    uint32_t num = h_data_view.extent(0);
+    uint32_t dim = h_data_view.extent(1);
 
     cudaEvent_t start_time, stop_time;
     cudaEventCreate(&start_time);
@@ -285,15 +286,14 @@ void define_partition_for_large_dataset(raft::device_resources &handle,
     uint32_t blocks_per_grid = batch_size;
 
     cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
-    auto kernel = define_partition_for_large_dataset_kernel_config::choose_kernel(centroid_num);
+    auto kernel = define_partition_for_large_kernel_config::choose_kernel(centroid_num);
 
     float define_time = 0.0f;
     for (uint32_t i = 0; i < batch_num; i++) {
         uint32_t start_id = i * batch_size;
 
-        raft::copy(d_data_view.data_handle(), data_view.data_handle() + static_cast<uint64_t>(start_id) * dim,
-                   static_cast<uint64_t>(batch_size) * dim,
-                   raft::resource::get_cuda_stream(handle));
+        raft::copy(d_data_view.data_handle(), h_data_view.data_handle() + static_cast<uint64_t>(start_id) * dim,
+                   static_cast<uint64_t>(batch_size) * dim, raft::resource::get_cuda_stream(handle));
 
         auto d_segment_index_ptr = d_segment_index_view.data_handle() + start_id;
 
@@ -314,10 +314,9 @@ void define_partition_for_large_dataset(raft::device_resources &handle,
         define_time += milliseconds / 1000.0f;
     }
     build_time += define_time;
-    std::cout << "define time: " << define_time << " s" << std::endl;
 
-    raft::copy(segment_length_view.data_handle(), d_segment_length.data_handle(), segment_length_view.size(),
-               raft::resource::get_stream_from_stream_pool(handle));
+    raft::copy(segment_length_view.data_handle(), d_segment_length.data_handle(),
+               segment_length_view.size(), raft::resource::get_stream_from_stream_pool(handle));
     raft::resource::sync_stream(handle);
 
     uint32_t start = 0;
@@ -328,15 +327,15 @@ void define_partition_for_large_dataset(raft::device_resources &handle,
 }
 
 void reorder_for_large_dataset(raft::device_resources &handle,
-                               raft::host_matrix_view<uint8_t, uint64_t> data_view,
+                               raft::host_matrix_view<uint8_t, uint64_t> h_data_view,
                                raft::device_matrix_view<uint8_t, uint64_t> d_data_view,
                                raft::host_vector_view<uint32_t> segment_start_view,
                                raft::host_vector_view<uint32_t> mapping_view,
                                raft::host_matrix_view<uint8_t, uint64_t> reorder_data_view,
                                raft::device_vector_view<uint32_t> d_segment_index_view,
                                uint32_t batch_num, float &build_time) {
-    uint32_t num = data_view.extent(0);
-    uint32_t dim = data_view.extent(1);
+    uint32_t num = h_data_view.extent(0);
+    uint32_t dim = h_data_view.extent(1);
     uint32_t batch_size = num / batch_num;
     uint32_t segment = segment_start_view.size();
 
@@ -359,9 +358,8 @@ void reorder_for_large_dataset(raft::device_resources &handle,
                      d_counts.data_handle() + d_counts.size(), 0);
 
         auto d_segment_index_ptr = d_segment_index_view.data_handle() + start_id;
-        raft::copy(d_data_view.data_handle(), data_view.data_handle() + static_cast<uint64_t>(start_id) * dim,
-                   static_cast<uint64_t>(batch_size) * dim,
-                   raft::resource::get_cuda_stream(handle));
+        raft::copy(d_data_view.data_handle(), h_data_view.data_handle() + static_cast<uint64_t>(start_id) * dim,
+                   static_cast<uint64_t>(batch_size) * dim, raft::resource::get_cuda_stream(handle));
 
         for (uint32_t segment_id = 0; segment_id < segment; segment_id++) {
             uint32_t segment_start = segment_start_view(segment_id);
@@ -370,7 +368,7 @@ void reorder_for_large_dataset(raft::device_resources &handle,
             auto d_batch_mapping = raft::make_device_vector<uint32_t>(handle, batch_size);
 
             cudaEventRecord(start_time);
-            reorder_for_large_dataset_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
+            reorder_for_large_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
                     d_data_view.data_handle(),
                     d_batch_data.data_handle(),
                     d_segment_index_ptr,
@@ -390,46 +388,48 @@ void reorder_for_large_dataset(raft::device_resources &handle,
             raft::copy(h_counts.data_handle(), d_counts.data_handle(), h_counts.size(),
                        raft::resource::get_stream_from_stream_pool(handle));
 
-            raft::copy(mapping_view.data_handle() + segment_start + current_counts[segment_id], d_batch_mapping.data_handle(),
-                       h_counts(segment_id), raft::resource::get_cuda_stream(handle));
-            raft::copy(reorder_data_view.data_handle() + static_cast<uint64_t>(segment_start + current_counts[segment_id]) * dim,
+            raft::copy(mapping_view.data_handle() + segment_start + current_counts[segment_id],
+                       d_batch_mapping.data_handle(),
+                       h_counts(segment_id),
+                       raft::resource::get_cuda_stream(handle));
+            raft::copy(reorder_data_view.data_handle() +
+                       static_cast<uint64_t>(segment_start + current_counts[segment_id]) * dim,
                        d_batch_data.data_handle(),
-                       static_cast<uint64_t>(h_counts(segment_id)) * dim, raft::resource::get_cuda_stream(handle));
+                       static_cast<uint64_t>(h_counts(segment_id)) * dim,
+                       raft::resource::get_cuda_stream(handle));
 
             current_counts[segment_id] += h_counts(segment_id);
         }
     }
     build_time += reorder_time;
-    std::cout << "reorder time: " << reorder_time << " s" << std::endl;
 }
 
-void preprocess_for_large_dataset(raft::device_resources &handle, PartitionParameter param,
-                                  raft::host_matrix_view<uint8_t, uint64_t> data_view,
-                                  raft::device_matrix_view<uint8_t, uint64_t> d_data_view,
-                                  raft::host_matrix_view<uint8_t, uint64_t> reorder_data_view,
-                                  raft::host_vector_view<uint32_t> mapping_view,
-                                  raft::host_vector_view<uint32_t> segment_start_view,
-                                  raft::host_vector_view<uint32_t> segment_length_view,
-                                  raft::device_matrix_view<float> d_centroid_view,
-                                  uint32_t batch_num, std::string &result_file) {
+void preprocess_for_large(raft::device_resources &handle, PartitionParameter param,
+                          raft::host_matrix_view<uint8_t, uint64_t> data_view,
+                          raft::device_matrix_view<uint8_t, uint64_t> d_data_view,
+                          raft::host_matrix_view<uint8_t, uint64_t> reorder_data_view,
+                          raft::host_vector_view<uint32_t> mapping_view,
+                          raft::host_vector_view<uint32_t> segment_start_view,
+                          raft::host_vector_view<uint32_t> segment_length_view,
+                          raft::device_matrix_view<float> d_centroid_view,
+                          uint32_t batch_num, std::string &result_file) {
     uint32_t num = data_view.extent(0);
 
     float build_time = 0.0f;
 
     auto d_segment_index = raft::make_device_vector<uint32_t>(handle, num);
 
-    get_centroids_for_large_dataset(handle, data_view, d_data_view, d_centroid_view,
-                                    param.centroid_num, param.sample_factor, batch_num, build_time);
+    get_centroids_for_large(handle, data_view, d_data_view, d_centroid_view, param.centroid_num, param.sample_factor,
+                            batch_num, build_time);
 
-    define_partition_for_large_dataset(handle, data_view, d_data_view, d_centroid_view,
-                                       segment_start_view, segment_length_view, d_segment_index.view(),
-                                       batch_num, param.metric, build_time);
+    define_partition_for_large(handle, data_view, d_data_view, d_centroid_view, segment_start_view, segment_length_view,
+                               d_segment_index.view(), batch_num, param.metric, build_time);
 
     reorder_for_large_dataset(handle, data_view, d_data_view, segment_start_view, mapping_view,
                               reorder_data_view, d_segment_index.view(), batch_num, build_time);
 
-    std::cout<<"preprocessing time: "<<build_time<<" s"<<std::endl;
+    std::cout << "preprocessing time: " << build_time << " s" << std::endl;
     std::ofstream result_out(result_file, std::ios::app);
-    result_out << build_time <<",";
+    result_out << build_time << ",";
     result_out.close();
 }
