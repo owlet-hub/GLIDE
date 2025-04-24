@@ -2,7 +2,7 @@
 #include "glide_impl.cuh"
 #include <fstream>
 
-uint32_t calculate_recall(raft::host_matrix_view<uint32_t> neighbors,
+float calculate_recall(raft::host_matrix_view<uint32_t> neighbors,
                           raft::host_matrix_view<uint32_t> truth,
                           uint32_t top_k) {
     uint32_t query_num = neighbors.extent(0);
