@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
     std::string preprocess_file(argv[4]);
     std::string graph_base_file(argv[5]);
     std::string result_file(argv[6]);
-    std::string centroid_file = preprocess_file + ".centroids";
+    std::string centroid_file = preprocess_file + ".centroid";
     std::string graph_file = graph_base_file + ".graph";
     std::string start_point_file = graph_base_file + ".sp";
     std::string metric(argv[7]);

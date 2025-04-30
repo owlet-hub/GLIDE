@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
     std::string data_file(argv[1]);
     std::string preprocess_file(argv[2]);
     std::string result_file(argv[3]);
-    std::string centroid_file = preprocess_file + ".centroids";
+    std::string centroid_file = preprocess_file + ".centroid";
     std::string segment_file = preprocess_file + ".segment";
     std::string map_file = preprocess_file + ".map";
     std::string reorder_file = preprocess_file + ".reorder";
