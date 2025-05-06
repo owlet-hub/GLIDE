@@ -30,8 +30,8 @@ add_executable(large_build src/large_build.cu)
 add_executable(large_search src/large_search.cu)
 
 if(OpenMP_CXX_FOUND)
-    target_compile_options(knn PUBLIC ${OpenMP_CXX_FLAGS})
-    target_link_libraries(knn PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_options(small_knn PUBLIC ${OpenMP_CXX_FLAGS})
+    target_link_libraries(small_knn PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
 target_link_libraries(small_preprocess PRIVATE cuvs::cuvs $<TARGET_NAME_IF_EXISTS:conda_env>)
