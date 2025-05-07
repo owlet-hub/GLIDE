@@ -2,9 +2,18 @@
 #include "glide_impl.cuh"
 #include <fstream>
 
+/**
+ * @brief Calculate recall between search results and ground truth
+ *
+ * @param neighbors Host matrix view of found neighbor IDs (query_num × top_k)
+ * @param truth Host matrix view of ground truth neighbor IDs (query_num × top_k)
+ * @param top_k Number of neighbors to consider
+ *
+ * @return float Average recall across all queries
+ */
 float calculate_recall(raft::host_matrix_view<uint32_t> neighbors,
-                          raft::host_matrix_view<uint32_t> truth,
-                          uint32_t top_k) {
+                       raft::host_matrix_view<uint32_t> truth,
+                       uint32_t top_k) {
     uint32_t query_num = neighbors.extent(0);
     float total_recall = 0.0;
 
@@ -26,7 +35,24 @@ float calculate_recall(raft::host_matrix_view<uint32_t> neighbors,
     return total_recall / query_num;
 }
 
-
+/**
+ * @brief Main function for nearest neighbor search pipeline for small-scale data
+ *
+ * @param argc Number of command line arguments
+ * @param argv Command line arguments:
+ *             [0] Program name
+ *             [1] Input data file path
+ *             [2] Input query file path
+ *             [3] Input ground truth file path
+ *             [4] Input preprocess file base path
+ *             [5] Input graph file base path
+ *             [6] Result file path
+ *             [7] Distance metric ("Euclidean" or "Cosine")
+ *             [8] Number of neighbors to search (uint32_t)
+ *             [9] Search beam size (uint32_t)
+ *
+ * @return int Program exit status (0 for success, non-zero for failure)
+ */
 int main(int argc, char **argv) {
     if (argc != 10) {
         std::cout << argv[0]
@@ -57,16 +83,16 @@ int main(int argc, char **argv) {
         index_metric = Metric::Cosine;
     }
 
-    auto data = load_data<float, uint32_t>(data_file);
-    auto query = load_data<float, uint32_t>(query_file);
-    auto truth = load_data<uint32_t, uint32_t>(truth_file);
-    auto graph = load_data<uint32_t, uint32_t>(graph_file);
-    auto start_point = load_start_point(start_point_file);
-    auto centroids = load_data<float, uint32_t>(centroid_file);
+    auto data = load_matrix_data<float, uint32_t>(data_file);
+    auto query = load_matrix_data<float, uint32_t>(query_file);
+    auto truth = load_matrix_data<uint32_t, uint32_t>(truth_file);
+    auto graph = load_matrix_data<uint32_t, uint32_t>(graph_file);
+    auto start_point = load_vector_data(start_point_file);
+    auto centroids = load_matrix_data<float, uint32_t>(centroid_file);
 
     uint32_t degree = graph.extent(1);
     SearchParameter search_param;
-    search_param.topk = std::stoi(argv[8]);
+    search_param.top_k = std::stoi(argv[8]);
     search_param.beam = std::stoi(argv[9]);
 
     std::ofstream result_out(result_file, std::ios::app);
@@ -81,18 +107,18 @@ int main(int argc, char **argv) {
                                                                      search_param.hash_max_fill_rate,
                                                                      search_param.hash_bit);
 
-    GLIDE index(handle, degree, data.view(), centroids.view(), index_metric);
+    GLIDE<float, uint32_t> index(handle, degree, data.view(), centroids.view(), index_metric);
     index.load(graph.view(), start_point.view());
 
     auto d_query = raft::make_device_matrix<float>(handle, query.extent(0), query.extent(1));
     raft::copy(d_query.data_handle(), query.data_handle(),
                query.size(), raft::resource::get_cuda_stream(handle));
-    auto result_ids = raft::make_host_matrix<uint32_t>(d_query.extent(0), search_param.topk);
-    auto result_dists = raft::make_host_matrix<float>(d_query.extent(0), search_param.topk);
+    auto result_ids = raft::make_host_matrix<uint32_t>(d_query.extent(0), search_param.top_k);
+    auto result_dists = raft::make_host_matrix<float>(d_query.extent(0), search_param.top_k);
 
     index.search(search_param, d_query.view(), result_ids, result_dists, result_file);
 
-    float recall = calculate_recall(result_ids.view(), truth.view(), search_param.topk);
+    float recall = calculate_recall(result_ids.view(), truth.view(), search_param.top_k);
 
     std::ofstream result;
     result.open(result_file, std::ios::app);

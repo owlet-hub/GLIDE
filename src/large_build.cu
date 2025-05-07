@@ -2,6 +2,25 @@
 #include "glide_large_impl.cuh"
 #include <fstream>
 
+/**
+ * @brief Main function for building the GLIDE graph index for large-scale data
+ *
+ * @param argc Number of command line arguments
+ * @param argv Command line arguments:
+ *             [0] Program name
+ *             [1] Input preprocess file base path
+ *             [2] Input KNN graph file path
+ *             [3] Output Graph file base path
+ *             [4] Result file path
+ *             [5] Distance metric ("Euclidean" or "Cosine")
+ *             [6] Graph degree (uint32_t)
+ *             [7] KNN degree (uint32_t)
+ *             [8] Relaxation factor for pruning (float)
+ *             [9] Search beam size for build (uint32_t)
+ *             [10] Search beam size for refinement (uint32_t)
+ *
+ * @return int Program exit status (0 for success, non-zero for failure)
+ */
 int main(int argc, char **argv) {
     if (argc != 11) {
         std::cout << argv[0]
@@ -60,10 +79,10 @@ int main(int argc, char **argv) {
                                                                             search_param_refine.hash_max_fill_rate,
                                                                             search_param_refine.hash_bit);
 
-    auto knn_graph = load_data<uint32_t, uint64_t>(knn_file);
+    auto knn_graph = load_matrix_data<uint32_t, uint64_t>(knn_file);
 
-    GLIDE_large index(handle, build_param.graph_degree, build_param.metric,
-                      reorder_file, map_file, centroid_file, segment_file);
+    GLIDE_large<uint8_t, uint64_t> index(handle, build_param.graph_degree, build_param.metric,
+                                         reorder_file, map_file, centroid_file, segment_file);
 
     std::ofstream result_out;
     result_out.open(result_file, std::ios::app);
@@ -72,21 +91,6 @@ int main(int argc, char **argv) {
 
     index.build(build_param, search_param_knn, search_param_refine, knn_graph.view(), result_file);
 
-    std::ofstream out(graph_file, std::ios::binary);
-    uint32_t num = index.num();
-    uint32_t degree = index.graph_degree();
-    out.write(reinterpret_cast<const char *>(&num), sizeof(uint32_t));
-    out.write(reinterpret_cast<const char *>(&degree), sizeof(uint32_t));
-    for (uint32_t i = 0; i < num; i++) {
-        uint64_t start_pos = static_cast<uint64_t>(i) * degree;
-        out.write(reinterpret_cast<const char *>(index.graph_view().data_handle() + start_pos),
-                  degree * sizeof(uint32_t));
-    }
-    out.close();
-
-    std::ofstream start_point_out(start_point_file, std::ios::binary);
-    uint32_t start_point_num = index.start_point_num();
-    start_point_out.write(reinterpret_cast<const char *>(&start_point_num), sizeof(uint32_t));
-    start_point_out.write(reinterpret_cast<const char *>(index.start_point_view().data_handle()),
-                          start_point_num * sizeof(uint32_t));
+    save_matrix_data<uint32_t, uint64_t>(graph_file, index.graph_view());
+    save_vector_data(start_point_file, index.start_point_view());
 }

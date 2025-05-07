@@ -2,6 +2,19 @@
 #include "nn_descent.cuh"
 #include <fstream>
 
+/**
+ * @brief Main function for KNN graph construction pipeline for small-scale data
+ *
+ * @param argc Number of command line arguments
+ * @param argv Command line arguments:
+ *             [0] Program name
+ *             [1] Input preprocess file base path
+ *             [2] Output KNN graph file path
+ *             [3] Result file path
+ *             [4] KNN degree (uint32_t)
+ *
+ * @return int Program exit status (0 for success, non-zero for failure)
+ */
 int main(int argc, char **argv) {
     if (argc != 5) {
         std::cout << argv[0]
@@ -22,7 +35,7 @@ int main(int argc, char **argv) {
     std::string result_file(argv[3]);
     uint32_t knn_degree = std::stoi(argv[4]);
 
-    auto h_data = load_data<float, uint32_t>(reorder_file);
+    auto h_data = load_matrix_data<float, uint32_t>(reorder_file);
     auto h_segment_start = load_segment_start(segment_file);
     auto h_segment_length = load_segment_length(segment_file);
 
@@ -36,14 +49,5 @@ int main(int argc, char **argv) {
     auto knn_index = build_nnd(handle, nnd_param, d_reorder_data,
                                h_segment_start.view(), h_segment_length.view(), result_file);
 
-    uint32_t num = knn_index.extent(0);
-    uint32_t degree = knn_index.extent(1);
-    std::ofstream out(knn_file, std::ios::binary);
-    out.write(reinterpret_cast<const char *>(&num), sizeof(num));
-    out.write(reinterpret_cast<const char *>(&degree), sizeof(degree));
-    for (uint32_t i = 0; i < num; i++) {
-        uint64_t start_pos = i * degree;
-        out.write(reinterpret_cast<const char *>(knn_index.data_handle() + start_pos), degree * sizeof(uint32_t));
-    }
-    out.close();
+    save_matrix_data<int, uint32_t>(knn_file, knn_index.view());
 }

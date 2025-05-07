@@ -2,9 +2,18 @@
 #include "glide_large_impl.cuh"
 #include <fstream>
 
+/**
+ * @brief Calculate recall between search results and ground truth
+ *
+ * @param neighbors Host matrix view of found neighbor IDs (query_num × top_k)
+ * @param truth Host matrix view of ground truth neighbor IDs (query_num × top_k)
+ * @param top_k Number of neighbors to consider
+ *
+ * @return float Average recall across all queries
+ */
 float calculate_recall(raft::host_matrix_view<uint32_t> neighbors,
-                          raft::host_matrix_view<uint32_t> truth,
-                          uint32_t top_k) {
+                       raft::host_matrix_view<uint32_t> truth,
+                       uint32_t top_k) {
     uint32_t query_num = neighbors.extent(0);
     float total_recall = 0.0;
 
@@ -26,10 +35,29 @@ float calculate_recall(raft::host_matrix_view<uint32_t> neighbors,
     return total_recall / query_num;
 }
 
+/**
+ * @brief Main function for nearest neighbor search pipeline for large-scale data
+ *
+ * @param argc Number of command line arguments
+ * @param argv Command line arguments:
+ *             [0] Program name
+ *             [1] Input preprocess file base path
+ *             [2] Input query file path
+ *             [3] Input ground truth file path
+ *             [4] Input graph file base path
+ *             [5] Result file path
+ *             [6] Distance metric ("Euclidean" or "Cosine")
+ *             [7] Number of neighbors to search (uint32_t)
+ *             [8] Search beam size (uint32_t)
+ *             [9] Minimum number of sub-graphs to be searched (uint32_t)
+ *             [10] Boundary factor for boundary point identification (float)
+ *
+ * @return int Program exit status (0 for success, non-zero for failure)
+ */
 int main(int argc, char **argv) {
     if (argc != 11) {
         std::cout << argv[0]
-                  << "preprocess_file query_file truth_file graph_base_file result_file metric topk search_beam min_segment_num boundary_factor"
+                  << "preprocess_file query_file truth_file graph_base_file result_file metric topk search_beam min_graph_num boundary_factor"
                   << std::endl;
         exit(-1);
     }
@@ -59,7 +87,7 @@ int main(int argc, char **argv) {
     }
 
     SearchParameter search_param;
-    search_param.topk = std::stoi(argv[7]);
+    search_param.top_k = std::stoi(argv[7]);
     search_param.beam = std::stoi(argv[8]);
     uint32_t min_segment_num = std::stoi(argv[9]);
     float boundary_factor = std::stof(argv[10]);
@@ -68,9 +96,8 @@ int main(int argc, char **argv) {
     result_out << search_param.beam << ",";
     result_out.close();
 
-    GLIDE_large index(handle, index_metric,
-                      reorder_file, map_file, centroid_file,
-                      segment_file, start_point_file, graph_file);
+    GLIDE_large<uint8_t, uint64_t> index(handle, index_metric, reorder_file, map_file, centroid_file,
+                                         segment_file, start_point_file, graph_file);
 
     adjust_search_params(search_param.min_iterations, search_param.max_iterations, search_param.beam);
     search_param.hash_bit = calculate_hash_bitlen(search_param.beam, index.graph_degree(),
@@ -81,18 +108,18 @@ int main(int argc, char **argv) {
                                                                      search_param.hash_max_fill_rate,
                                                                      search_param.hash_bit);
 
-    auto query = load_data<uint8_t, uint32_t>(query_file);
+    auto query = load_matrix_data<uint8_t, uint32_t>(query_file);
     auto d_query = raft::make_device_matrix<uint8_t, uint32_t>(handle, query.extent(0), query.extent(1));
     raft::copy(d_query.data_handle(), query.data_handle(),
                query.size(), raft::resource::get_stream_from_stream_pool(handle));
-    auto result_ids = raft::make_host_matrix<uint32_t, uint32_t>(d_query.extent(0), search_param.topk);
-    auto result_distances = raft::make_host_matrix<float, uint32_t>(d_query.extent(0), search_param.topk);
+    auto result_ids = raft::make_host_matrix<uint32_t, uint32_t>(d_query.extent(0), search_param.top_k);
+    auto result_distances = raft::make_host_matrix<float, uint32_t>(d_query.extent(0), search_param.top_k);
 
     index.search(search_param, min_segment_num, boundary_factor, d_query.view(), result_ids.view(),
                  result_distances.view(), result_file);
 
-    auto truth = load_data<uint32_t, uint32_t>(truth_file);
-    float recall = calculate_recall(result_ids.view(), truth.view(), search_param.topk);
+    auto truth = load_matrix_data<uint32_t, uint32_t>(truth_file);
+    float recall = calculate_recall(result_ids.view(), truth.view(), search_param.top_k);
 
     std::ofstream result;
     result.open(result_file, std::ios::app);

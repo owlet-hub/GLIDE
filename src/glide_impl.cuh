@@ -12,39 +12,42 @@
 #include <random>
 #include <thrust/execution_policy.h>
 
-GLIDE::GLIDE(raft::device_resources &handle, uint32_t graph_degree,
-             raft::host_matrix_view<float> h_data,
-             raft::host_matrix_view<float> h_centroids, Metric metric)
-        : handle(handle),
-          metric(metric),
-          d_graph{raft::make_device_matrix<uint32_t, uint32_t, raft::row_major>(handle, num(), graph_degree)},
-          d_data{raft::make_device_matrix<float, uint32_t, raft::row_major>(handle, h_data.extent(0),
-                                                                            h_data.extent(1))},
-          d_centroids{raft::make_device_matrix<float, uint32_t, raft::row_major>(handle, h_centroids.extent(0),
-                                                                                 h_centroids.extent(1))} {
-    raft::copy(d_data.data_handle(), h_data.data_handle(),
-               h_data.size(), raft::resource::get_stream_from_stream_pool(handle));
-    raft::copy(d_centroids.data_handle(), h_centroids.data_handle(),
-               h_centroids.size(), raft::resource::get_stream_from_stream_pool(handle));
+template<typename Data_t, typename Index_t>
+GLIDE<Data_t, Index_t>::GLIDE(raft::device_resources &handle, uint32_t graph_degree,
+                              raft::host_matrix_view<Data_t, Index_t> h_data_view,
+                              raft::host_matrix_view<float> h_centroid_view, Metric metric)
+        : handle(handle), metric(metric),
+          d_graph{raft::make_device_matrix<uint32_t, Index_t, raft::row_major>(handle, num(), graph_degree)},
+          d_data{raft::make_device_matrix<Data_t, Index_t, raft::row_major>(handle, h_data_view.extent(0),
+                                                                            h_data_view.extent(1))},
+          d_centroids{raft::make_device_matrix<float, uint32_t, raft::row_major>(handle, h_centroid_view.extent(0),
+                                                                                 h_centroid_view.extent(1))} {
+    raft::copy(d_data.data_handle(), h_data_view.data_handle(),
+               h_data_view.size(), raft::resource::get_stream_from_stream_pool(handle));
+    raft::copy(d_centroids.data_handle(), h_centroid_view.data_handle(),
+               h_centroid_view.size(), raft::resource::get_stream_from_stream_pool(handle));
 }
 
+template<typename Data_t, typename Index_t>
 void
-GLIDE::load(raft::host_matrix_view<uint32_t> h_graph,
-            raft::host_vector_view<uint32_t> h_start_points) {
-    d_start_points.emplace(raft::make_device_vector<uint32_t, uint32_t>(handle, h_start_points.size()));
+GLIDE<Data_t, Index_t>::load(raft::host_matrix_view<uint32_t, Index_t> h_graph_view,
+                             raft::host_vector_view<uint32_t> h_start_point_view) {
+    d_start_points.emplace(raft::make_device_vector<uint32_t, uint32_t>(handle, h_start_point_view.size()));
 
-    raft::copy(d_graph.data_handle(), h_graph.data_handle(),
-               h_graph.size(), raft::resource::get_cuda_stream(handle));
-    raft::copy(d_start_points->data_handle(), h_start_points.data_handle(),
-               h_start_points.size(), raft::resource::get_cuda_stream(handle));
+    raft::copy(d_graph.data_handle(), h_graph_view.data_handle(),
+               h_graph_view.size(), raft::resource::get_cuda_stream(handle));
+    raft::copy(d_start_points->data_handle(), h_start_point_view.data_handle(),
+               h_start_point_view.size(), raft::resource::get_cuda_stream(handle));
 }
 
-void GLIDE::start_point_select(raft::host_vector_view<uint32_t> h_segment_start_view,
-                               raft::host_vector_view<uint32_t> h_segment_length_view,
-                               raft::host_vector_view<uint32_t> h_map_view,
-                               raft::host_vector_view<uint32_t> h_reorder_start_points,
-                               raft::host_vector_view<uint32_t> h_start_points,
-                               float &build_time) {
+template<typename Data_t, typename Index_t>
+void
+GLIDE<Data_t, Index_t>::start_point_select(raft::host_vector_view<uint32_t> h_segment_start_view,
+                                           raft::host_vector_view<uint32_t> h_segment_length_view,
+                                           raft::host_vector_view<uint32_t> h_map_view,
+                                           raft::host_vector_view<uint32_t> h_reorder_start_points,
+                                           raft::host_vector_view<uint32_t> h_start_points,
+                                           float &build_time) {
     uint32_t start_point_num = h_segment_start_view.extent(0);
     thread_local std::mt19937 generator(std::random_device{}());
 
@@ -70,14 +73,15 @@ void GLIDE::start_point_select(raft::host_vector_view<uint32_t> h_segment_start_
     build_time += milliseconds / 1000.0f;
 }
 
+template<typename Data_t, typename Index_t>
 void
-GLIDE::subgraph_build_and_merge(SearchParameter &param, float relaxant_factor,
-                                raft::device_matrix_view<float> d_reorder_data_view,
-                                raft::device_vector_view<uint32_t> d_map_view,
-                                raft::device_vector_view<uint32_t> d_segment_start_view,
-                                raft::device_vector_view<uint32_t> d_segment_length_view,
-                                raft::device_matrix_view<uint32_t> d_knn_graph_view,
-                                float &build_time) {
+GLIDE<Data_t, Index_t>::subgraph_build_and_merge(SearchParameter &param, float relaxant_factor,
+                                                 raft::device_matrix_view<Data_t, Index_t> d_reorder_data_view,
+                                                 raft::device_vector_view<uint32_t> d_map_view,
+                                                 raft::device_vector_view<uint32_t> d_segment_start_view,
+                                                 raft::device_vector_view<uint32_t> d_segment_length_view,
+                                                 raft::device_matrix_view<uint32_t, Index_t> d_knn_graph_view,
+                                                 float &build_time) {
     uint32_t knn_degree = d_knn_graph_view.extent(1);
     uint32_t graph_degree = d_graph.extent(1);
     uint32_t segment_num = d_segment_start_view.extent(0);
@@ -97,7 +101,7 @@ GLIDE::subgraph_build_and_merge(SearchParameter &param, float relaxant_factor,
     result_buffer_size = roundUp32(result_buffer_size);
     uint32_t bitmap_size = ceildiv<uint32_t>(param.beam, 32);
     uint32_t max_graph_degree = roundUp32(graph_degree);
-    uint32_t shared_mem_size = dim * sizeof(float) + result_buffer_size * (sizeof(uint32_t) + sizeof(float)) +
+    uint32_t shared_mem_size = dim * sizeof(Data_t) + result_buffer_size * (sizeof(uint32_t) + sizeof(float)) +
                                max_graph_degree * sizeof(uint32_t) +
                                hashmap::get_size(param.hash_bit) * sizeof(uint32_t) +
                                1 * sizeof(uint32_t) + 3 * sizeof(uint32_t) +
@@ -105,7 +109,7 @@ GLIDE::subgraph_build_and_merge(SearchParameter &param, float relaxant_factor,
                                bitmap_size * sizeof(uint32_t);
     assert(shared_mem_size <= deviceProp.sharedMemPerBlock);
 
-    auto kernel_1 = build_kernel_config::choose_kernel(param.beam, knn_degree);
+    auto kernel_1 = build_kernel_config<Data_t, Index_t>::choose_kernel(param.beam, knn_degree);
 
     cudaEventRecord(start_time);
     for (uint32_t pid = 0; pid < num(); pid += max_points) {
@@ -143,7 +147,7 @@ GLIDE::subgraph_build_and_merge(SearchParameter &param, float relaxant_factor,
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
 
-    auto kernel_2 = build_boundary_kernel_config::choose_kernel(param.beam, knn_degree);
+    auto kernel_2 = build_boundary_kernel_config<Data_t, Index_t>::choose_kernel(param.beam, knn_degree);
     uint32_t segment_id = segment_num - 1;
     uint32_t segment_start = num();
     uint32_t boundary_num = reorder_num - num();
@@ -188,8 +192,9 @@ GLIDE::subgraph_build_and_merge(SearchParameter &param, float relaxant_factor,
     build_time += milliseconds / 1000.0f;
 }
 
+template<typename Data_t, typename Index_t>
 void
-GLIDE::reverse_graph(float &build_time) {
+GLIDE<Data_t, Index_t>::reverse_graph(float &build_time) {
     cudaEvent_t start_time, stop_time;
     float milliseconds = 0;
     cudaEventCreate(&start_time);
@@ -215,13 +220,14 @@ GLIDE::reverse_graph(float &build_time) {
         uint32_t threads_per_block = 512;
         uint32_t blocks_per_grid = (num() + threads_per_block - 1) / threads_per_block;
 
-        reverse_graph_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(d_destination_nodes.data_handle(),
-                                                                                d_reverse_graph.data_handle(),
-                                                                                d_reverse_graph_degree.data_handle(),
-                                                                                d_graph.data_handle(),
-                                                                                num(),
-                                                                                graph_degree(),
-                                                                                degree_id);
+        reverse_graph_kernel<Index_t><<<blocks_per_grid, threads_per_block, 0, stream>>>(
+                d_destination_nodes.data_handle(),
+                d_reverse_graph.data_handle(),
+                d_reverse_graph_degree.data_handle(),
+                d_graph.data_handle(),
+                num(),
+                graph_degree(),
+                degree_id);
         RAFT_CUDA_TRY(cudaPeekAtLastError());
     }
 //    RAFT_CUDA_TRY(cudaDeviceSynchronize());
@@ -237,7 +243,7 @@ GLIDE::reverse_graph(float &build_time) {
     uint32_t shared_mem_size = max_graph_degree * sizeof(uint32_t);
 
     cudaEventRecord(start_time);
-    insert_reverse_kernel<<<blocks_per_grid, threads_per_block, shared_mem_size, stream>>>(
+    insert_reverse_kernel<Index_t><<<blocks_per_grid, threads_per_block, shared_mem_size, stream>>>(
             d_graph.data_handle(),
             d_reverse_graph.data_handle(),
             d_reverse_graph_degree.data_handle(),
@@ -250,7 +256,9 @@ GLIDE::reverse_graph(float &build_time) {
     build_time += milliseconds / 1000.0f;
 }
 
-void GLIDE::refine(SearchParameter &param, float relaxant_factor, float &build_time) {
+template<typename Data_t, typename Index_t>
+void
+GLIDE<Data_t, Index_t>::refine(SearchParameter &param, float relaxant_factor, float &build_time) {
     cudaDeviceProp deviceProp = raft::resource::get_device_properties(handle);
     uint32_t max_size = deviceProp.maxGridSize[1];
     uint32_t max_points = std::min(num(), max_size);
@@ -264,7 +272,7 @@ void GLIDE::refine(SearchParameter &param, float relaxant_factor, float &build_t
     result_buffer_size = roundUp32(result_buffer_size);
     uint32_t bitmap_size = ceildiv<uint32_t>(param.beam, 32);
     uint32_t max_graph_degree = roundUp32(graph_degree());
-    uint32_t shared_mem_size = dim() * sizeof(float) +
+    uint32_t shared_mem_size = dim() * sizeof(Data_t) +
                                result_buffer_size * (sizeof(uint32_t) + sizeof(float)) +
                                max_graph_degree * sizeof(uint32_t) +
                                max_graph_degree * sizeof(uint32_t) +
@@ -274,7 +282,7 @@ void GLIDE::refine(SearchParameter &param, float relaxant_factor, float &build_t
                                bitmap_size * sizeof(uint32_t);
     assert(shared_mem_size <= deviceProp.sharedMemPerBlock);
 
-    auto kernel = refine_kernel_config::choose_kernel(param.beam, graph_degree(), centroid_num());
+    auto kernel = refine_kernel_config<Data_t, Index_t>::choose_kernel(param.beam, graph_degree(), centroid_num());
 
     cudaEventRecord(start_time);
     for (uint32_t pid = 0; pid < num(); pid += max_points) {
@@ -309,17 +317,19 @@ void GLIDE::refine(SearchParameter &param, float relaxant_factor, float &build_t
     build_time += milliseconds / 1000.0f;
 }
 
+template<typename Data_t, typename Index_t>
 void
-GLIDE::build(IndexParameter &build_param, SearchParameter &search_param_knn, SearchParameter &search_param_refine,
-             std::optional<raft::device_matrix<uint32_t>> &d_knn_graph,
-             std::optional<raft::device_vector<uint32_t>> &d_segment_start,
-             std::optional<raft::device_vector<uint32_t>> &d_segment_length,
-             std::optional<raft::device_vector<uint32_t>> &d_map,
-             raft::host_vector_view<uint32_t> h_segment_start_view,
-             raft::host_vector_view<uint32_t> h_segment_length_view,
-             raft::host_vector_view<uint32_t> h_map_view,
-             std::optional<raft::device_matrix<float>> &d_reorder_data,
-             std::string result_file) {
+GLIDE<Data_t, Index_t>::build(IndexParameter &build_param, SearchParameter &search_param_knn,
+                              SearchParameter &search_param_refine,
+                              std::optional<raft::device_matrix<uint32_t, Index_t>> &d_knn_graph,
+                              std::optional<raft::device_vector<uint32_t>> &d_segment_start,
+                              std::optional<raft::device_vector<uint32_t>> &d_segment_length,
+                              std::optional<raft::device_vector<uint32_t>> &d_map,
+                              raft::host_vector_view<uint32_t> h_segment_start_view,
+                              raft::host_vector_view<uint32_t> h_segment_length_view,
+                              raft::host_vector_view<uint32_t> h_map_view,
+                              std::optional<raft::device_matrix<Data_t, Index_t>> &d_reorder_data,
+                              std::string &result_file) {
     float build_time = 0.0f;
 
     auto h_start_point = raft::make_host_vector<uint32_t, uint32_t>(handle, d_segment_start->size() - 1);
@@ -358,14 +368,15 @@ GLIDE::build(IndexParameter &build_param, SearchParameter &search_param_knn, Sea
     result_out.close();
 }
 
+template<typename Data_t, typename Index_t>
 void
-GLIDE::search(SearchParameter &param,
-              raft::device_matrix_view<float> d_query_view,
-              raft::host_matrix<uint32_t> &result_ids,
-              raft::host_matrix<float> &result_dists,
-              std::string result_file) {
+GLIDE<Data_t, Index_t>::search(SearchParameter &param,
+                               raft::device_matrix_view<Data_t> d_query_view,
+                               raft::host_matrix<uint32_t> &result_ids,
+                               raft::host_matrix<float> &result_dists,
+                               std::string &result_file) {
     uint32_t query_number = d_query_view.extent(0);
-    uint32_t top_k = param.topk;
+    uint32_t top_k = param.top_k;
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
@@ -378,7 +389,7 @@ GLIDE::search(SearchParameter &param,
 
     uint32_t result_buffer_size = param.beam + graph_degree();
     result_buffer_size = roundUp32(result_buffer_size);
-    uint32_t shared_mem_size = dim() * sizeof(float) +
+    uint32_t shared_mem_size = dim() * sizeof(Data_t) +
                                result_buffer_size * (sizeof(uint32_t) + sizeof(float)) +
                                hashmap::get_size(param.hash_bit) * sizeof(uint32_t) +
                                1 * sizeof(uint32_t) + 3 * sizeof(uint32_t) + 1 * sizeof(uint32_t);
@@ -387,7 +398,7 @@ GLIDE::search(SearchParameter &param,
     auto d_result_ids = raft::make_device_matrix<uint32_t>(handle, query_number, top_k);
     auto d_result_dists = raft::make_device_matrix<float>(handle, query_number, top_k);
 
-    auto kernel = search_kernel_config::choose_kernel(param.beam, graph_degree(), centroid_num());
+    auto kernel = search_kernel_config<Data_t, Index_t>::choose_kernel(param.beam, graph_degree(), centroid_num());
 
     RAFT_CUDA_TRY(cudaFuncSetAttribute(kernel,
                                        cudaFuncAttributeMaxDynamicSharedMemorySize,
@@ -400,8 +411,6 @@ GLIDE::search(SearchParameter &param,
         uint32_t threads_per_block = set_block_size(handle, graph_degree(), param.search_block_size,
                                                     shared_mem_size, number_for_search);
         uint32_t blocks_per_grim = number_for_search;
-        std::cout << "threads per block: " << threads_per_block << "   " << "blocks_per_grim: " << blocks_per_grim
-                  << std::endl;
 
         auto d_result_ids_ptr = d_result_ids.data_handle() + qid * top_k;
         auto d_result_dists_ptr = d_result_dists.data_handle() + qid * top_k;

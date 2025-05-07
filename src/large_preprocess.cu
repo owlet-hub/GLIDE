@@ -3,6 +3,21 @@
 #include "params.cuh"
 #include <fstream>
 
+/**
+ * @brief Main function for data preprocessing pipeline for large-scale data
+ *
+ * @param argc Number of command line arguments
+ * @param argv Command line arguments:
+ *             [0] Program name
+ *             [1] Input data file path
+ *             [2] Output preprocess file base path
+ *             [3] Result file path
+ *             [4] Number of centroids (uint32_t)
+ *             [5] Sample factor for sampling-based cluster (float)
+ *             [6] Distance metric ("Euclidean" or "Cosine")
+ *
+ * @return int Program exit status (0 for success, non-zero for failure)
+ */
 int main(int argc, char **argv) {
     if (argc != 7) {
         std::cout << argv[0]
@@ -34,7 +49,7 @@ int main(int argc, char **argv) {
         partition_param.metric = Metric::Cosine;
     }
 
-    auto h_data = load_data<uint8_t, uint64_t>(data_file);
+    auto h_data = load_matrix_data<uint8_t, uint64_t>(data_file);
     uint32_t num = h_data.extent(0);
     uint32_t dim = h_data.extent(1);
     uint32_t batch_num = 10;
@@ -47,47 +62,16 @@ int main(int argc, char **argv) {
     auto d_centroids = raft::make_device_matrix<float, int>(handle, partition_param.centroid_num, dim);
 
     auto d_data = raft::make_device_matrix<uint8_t, uint64_t>(handle, batch_size, dim);
-    preprocess_for_large(handle, partition_param, h_data.view(), d_data.view(), h_reorder_data.view(), h_map.view(),
-                         h_segment_start.view(), h_segment_length.view(), d_centroids.view(), batch_num, result_file);
-
-//    for (uint32_t i = 0; i < segment_start.size(); i++) {
-//        std::cout << segment_start(i) << " " << segment_start(i) + segment_length(i) << " "
-//                  << segment_length(i)
-//                  << std::endl;
-//    }
+    preprocess_for_large<uint8_t, uint64_t>(handle, partition_param, h_data.view(), d_data.view(),
+                                            h_reorder_data.view(), h_map.view(), h_segment_start.view(),
+                                            h_segment_length.view(), d_centroids.view(), batch_num, result_file);
 
     auto centroids = raft::make_host_matrix<float>(partition_param.centroid_num, dim);
     raft::copy(centroids.data_handle(), d_centroids.data_handle(), centroids.size(),
                raft::resource::get_stream_from_stream_pool(handle));
 
-    std::ofstream centroid_out(centroid_file, std::ios::binary);
-    centroid_out.write(reinterpret_cast<const char *>(&partition_param.centroid_num), sizeof(uint32_t));
-    centroid_out.write(reinterpret_cast<const char *>(&dim), sizeof(uint32_t));
-    for (uint32_t i = 0; i < partition_param.centroid_num; i++) {
-        uint32_t start_pos = i * dim;
-        centroid_out.write(reinterpret_cast<const char *>(centroids.data_handle() + start_pos), dim * sizeof(float));
-    }
-    centroid_out.close();
-
-    std::ofstream segment_out(segment_file, std::ios::binary);
-    uint32_t segment_num = h_segment_start.size();
-    segment_out.write(reinterpret_cast<const char *>(&segment_num), sizeof(uint32_t));
-    segment_out.write(reinterpret_cast<const char *>(h_segment_start.data_handle()), segment_num * sizeof(uint32_t));
-    segment_out.write(reinterpret_cast<const char *>(h_segment_length.data_handle()), segment_num * sizeof(uint32_t));
-    segment_out.close();
-
-    std::ofstream map_out(map_file, std::ios::binary);
-    map_out.write(reinterpret_cast<const char *>(&num), sizeof(uint32_t));
-    map_out.write(reinterpret_cast<const char *>(h_map.data_handle()), num * sizeof(uint32_t));
-    map_out.close();
-
-    std::ofstream reorder_out(reorder_file, std::ios::binary);
-    reorder_out.write(reinterpret_cast<const char *>(&num), sizeof(uint32_t));
-    reorder_out.write(reinterpret_cast<const char *>(&dim), sizeof(uint32_t));
-    for (uint32_t i = 0; i < num; i++) {
-        uint64_t start_pos = static_cast<uint64_t>(i) * dim;
-        reorder_out.write(reinterpret_cast<const char *>(h_reorder_data.data_handle() + start_pos),
-                          dim * sizeof(uint8_t));
-    }
-    reorder_out.close();
+    save_matrix_data<float, uint32_t>(centroid_file, centroids.view());
+    save_segment(segment_file, h_segment_start.view(), h_segment_length.view());
+    save_vector_data(map_file, h_map.view());
+    save_matrix_data<uint8_t, uint64_t>(reorder_file, h_reorder_data.view());
 }

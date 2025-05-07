@@ -2,6 +2,26 @@
 #include "glide_impl.cuh"
 #include <fstream>
 
+/**
+ * @brief Main function for building the GLIDE graph index for small-scale data
+ *
+ * @param argc Number of command line arguments
+ * @param argv Command line arguments:
+ *             [0] Program name
+ *             [1] Input data file path
+ *             [2] Input preprocess file base path
+ *             [3] Input KNN graph file path
+ *             [4] Output Graph file base path
+ *             [5] Result file path
+ *             [6] Distance metric ("Euclidean" or "Cosine")
+ *             [7] Graph degree (uint32_t)
+ *             [8] KNN degree (uint32_t)
+ *             [9] Relaxation factor for pruning (float)
+ *             [10] Search beam size for build (uint32_t)
+ *             [11] Search beam size for refinement (uint32_t)
+ *
+ * @return int Program exit status (0 for success, non-zero for failure)
+ */
 int main(int argc, char **argv) {
     if (argc != 12) {
         std::cout << argv[0]
@@ -61,13 +81,13 @@ int main(int argc, char **argv) {
                                                                             search_param_refine.hash_max_fill_rate,
                                                                             search_param_refine.hash_bit);
 
-    auto h_data = load_data<float, uint32_t>(data_file);
-    auto h_centroids = load_data<float, uint32_t>(centroid_file);
+    auto h_data = load_matrix_data<float, uint32_t>(data_file);
+    auto h_centroids = load_matrix_data<float, uint32_t>(centroid_file);
     auto h_segment_start = load_segment_start(segment_file);
     auto h_segment_length = load_segment_length(segment_file);
-    auto h_map = load_map(map_file);
-    auto h_reorder_data = load_data<float, uint32_t>(reorder_file);
-    auto h_knn_graph = load_data<uint32_t, uint32_t>(knn_file);
+    auto h_map = load_vector_data(map_file);
+    auto h_reorder_data = load_matrix_data<float, uint32_t>(reorder_file);
+    auto h_knn_graph = load_matrix_data<uint32_t, uint32_t>(knn_file);
 
     std::optional<raft::device_matrix<float>> d_reorder_data;
     std::optional<raft::device_vector<uint32_t>> d_map;
@@ -92,7 +112,7 @@ int main(int argc, char **argv) {
     raft::copy(d_knn_graph->data_handle(), h_knn_graph.data_handle(),
                h_knn_graph.size(), raft::resource::get_cuda_stream(handle));
 
-    GLIDE index(handle, build_param.graph_degree, h_data.view(), h_centroids.view(), build_param.metric);
+    GLIDE<float, uint32_t> index(handle, build_param.graph_degree, h_data.view(), h_centroids.view(), build_param.metric);
 
     std::ofstream result_out;
     result_out.open(result_file, std::ios::app);
@@ -112,19 +132,6 @@ int main(int argc, char **argv) {
     raft::copy(start_point.data_handle(), index.start_point_view().data_handle(), start_point.size(),
                raft::resource::get_cuda_stream(handle));
 
-    std::ofstream out(graph_file, std::ios::binary);
-    out.write(reinterpret_cast<const char *>(&num), sizeof(uint32_t));
-    out.write(reinterpret_cast<const char *>(&degree), sizeof(uint32_t));
-    for (int i = 0; i < num; i++) {
-        uint32_t start_pos = i * degree;
-        out.write(reinterpret_cast<const char *>(graph.data_handle() + start_pos), degree * sizeof(uint32_t));
-    }
-    out.close();
-
-    std::ofstream start_point_out(start_point_file, std::ios::binary);
-    uint32_t start_point_size = index.start_point_num();
-    start_point_out.write(reinterpret_cast<const char *>(&start_point_size), sizeof(uint32_t));
-    start_point_out.write(reinterpret_cast<const char *>(start_point.data_handle()),
-                          start_point_size * sizeof(uint32_t));
-    start_point_out.close();
+    save_matrix_data<uint32_t, uint32_t>(graph_file, graph.view());
+    save_vector_data(start_point_file, start_point.view());
 }

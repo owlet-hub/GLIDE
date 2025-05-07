@@ -228,9 +228,6 @@ public:
         uint32_t global_set_idx = list_id * num_bits_per_set_ * num_sets_per_list_ +
                                   key % num_sets_per_list_ * num_bits_per_set_;
 
-//        std::cout<<"list_id: "<<list_id<<" num_sets_per_list_: "<<num_sets_per_list_<<" num_bits_per_set_: "<<num_bits_per_set_<<" key: "<<key<<std::endl;
-//        std::cout<<"global_set_idx: "<<global_set_idx<<" hash: "<<hash<<std::endl;
-
         is_present &= bitsets_[global_set_idx + hash % num_bits_per_set_];
 
         if (!is_present) return false;
@@ -297,24 +294,17 @@ struct GnndGraph {
 
     thrust::host_vector<Index_t, pinned_memory_allocator<Index_t>> h_graph_old;
     thrust::host_vector<int2, pinned_memory_allocator<int2>> h_list_sizes_old;
-//    BloomFilter<Index_t> bloom_filter;
     std::vector<BloomFilter<Index_t>> bloom_filter;
 
     GnndGraph(const GnndGraph &) = delete;
 
     GnndGraph &operator=(const GnndGraph &) = delete;
 
-//    GnndGraph(const uint32_t nrow, const uint32_t node_degree, const uint32_t internal_node_degree,
-//              const uint32_t num_samples);
     GnndGraph(const uint32_t nrow, const uint32_t node_degree, const uint32_t internal_node_degree,
               const uint32_t num_samples, uint32_t segment_num, uint32_t *segment_length);
 
-    void init_random_graph();
-
     void init_random_graph(raft::host_vector_view<uint32_t> segment_start_view,
                            raft::host_vector_view<uint32_t> segment_length_view);
-
-    void sample_graph_new(InternalID_t<Index_t> *new_neighbors, const uint32_t width);
 
     void sample_graph_new(InternalID_t<Index_t> *new_neighbors, const uint32_t width,
                           raft::host_vector_view<uint32_t> segment_start_view,
@@ -335,8 +325,6 @@ struct GnndGraph {
                               std::atomic<int64_t> &update_counter,
                               int segment_start, int segment_end);
 
-    void sort_lists();
-
     void clear();
 
     ~GnndGraph();
@@ -351,33 +339,15 @@ public:
 
     GNND &operator=(const GNND &) = delete;
 
-//    void build(const Data_t *data, const uint32_t nrow, Index_t *output_graph, uint32_t graph_degree,
-//               raft::host_vector_view<uint32_t> segment_start_view,
-//               raft::host_vector_view<uint32_t> segment_length_view);
-
     ~GNND() = default;
 
-    void build(raft::device_matrix_view<float> d_reorder_data_view, uint32_t nrow, Index_t *output_graph,
-               uint32_t graph_degree,
-               raft::host_vector_view<uint32_t> segment_start_view,
-               raft::host_vector_view<uint32_t> segment_length_view);
-
-    void build(std::optional<raft::device_matrix<float>> &data, uint32_t nrow, Index_t *output_graph,
-               uint32_t graph_degree,
+    void build(std::optional<raft::device_matrix<Data_t>> &data, uint32_t nrow, Index_t *output_graph,
                raft::host_vector_view<uint32_t> segment_start_view,
                raft::host_vector_view<uint32_t> segment_length_view);
 
     using ID_t = InternalID_t<Index_t>;
 
 private:
-    void add_reverse_edges(Index_t *graph_ptr,
-                           Index_t *h_rev_graph_ptr,
-                           Index_t *d_rev_graph_ptr,
-                           int2 *list_sizes,
-                           cudaStream_t stream = 0);
-
-    void local_join(cudaStream_t stream = 0);
-
     void add_reverse_edges(Index_t *graph_ptr,
                            Index_t *h_rev_graph_ptr,
                            Index_t *d_rev_graph_ptr,
@@ -392,7 +362,6 @@ private:
 
     BuildConfig build_config_;
     GnndGraph<Index_t> graph_;
-//    std::atomic<int64_t> update_counter_;
     std::vector<std::unique_ptr<std::atomic<int64_t>>> update_counter_;
 
     uint32_t nrow_;
@@ -984,7 +953,6 @@ GnndGraph<Index_t>::GnndGraph(const uint32_t nrow,
           node_degree(node_degree),
           num_samples(num_samples),
           segment_num(segment),
-//          bloom_filter(nrow, internal_node_degree / segment_size, 3),
           h_dists{raft::make_host_matrix<DistData_t, uint32_t, raft::row_major>(nrow, node_degree)},
           h_graph_new(nrow * num_samples),
           h_list_sizes_new(nrow),
@@ -1003,30 +971,9 @@ GnndGraph<Index_t>::GnndGraph(const uint32_t nrow,
 }
 
 template<typename Index_t>
-void GnndGraph<Index_t>::sample_graph_new(InternalID_t<Index_t> *new_neighbors, const uint32_t width) {
-#pragma omp parallel for
-    for (uint32_t i = 0; i < nrow; i++) {
-        auto list_new = h_graph_new.data() + i * num_samples;
-        h_list_sizes_new[i].x = 0;
-        h_list_sizes_new[i].y = 0;
-
-        for (uint32_t j = 0; j < width; j++) {
-            auto new_neighbor_id = new_neighbors[i * width + j].id();
-            if ((uint32_t) new_neighbor_id >= nrow) break;
-//            if (bloom_filter.check(i, new_neighbor_id)) { continue; }
-//            bloom_filter.add(i, new_neighbor_id);
-            new_neighbors[i * width + j].mark_old();
-            list_new[h_list_sizes_new[i].x++] = new_neighbor_id;
-            if (h_list_sizes_new[i].x == num_samples) break;
-        }
-    }
-}
-
-template<typename Index_t>
 void GnndGraph<Index_t>::sample_graph_new(InternalID_t<Index_t> *new_neighbors, const uint32_t width,
                                           raft::host_vector_view<uint32_t> segment_start_view,
                                           raft::host_vector_view<uint32_t> segment_length_view) {
-//    std::cout<<"sample_graph_new"<<std::endl;
     uint32_t segment = segment_start_view.extent(0);
 
 #pragma omp parallel for
@@ -1054,35 +1001,8 @@ void GnndGraph<Index_t>::sample_graph_new(InternalID_t<Index_t> *new_neighbors, 
 }
 
 template<typename Index_t>
-void GnndGraph<Index_t>::init_random_graph() {
-    for (uint32_t seg_idx = 0; seg_idx < num_segments; seg_idx++) {
-        std::vector<Index_t> rand_seq(nrow / num_segments);
-        std::iota(rand_seq.begin(), rand_seq.end(), 0);
-        auto gen = std::default_random_engine{seg_idx};
-        std::shuffle(rand_seq.begin(), rand_seq.end(), gen);
-
-#pragma omp parallel for
-        for (uint32_t i = 0; i < nrow; i++) {
-            uint32_t base_idx = i * node_degree + seg_idx * SEGMENT_SIZE;
-            auto h_neighbor_list = h_graph + base_idx;
-            auto h_dist_list = h_dists.data_handle() + base_idx;
-            for (uint32_t j = 0; j < SEGMENT_SIZE; j++) {
-                uint32_t idx = base_idx + j;
-                Index_t id = rand_seq[idx % rand_seq.size()] * num_segments + seg_idx;
-                if ((uint32_t) id == i) {
-                    id = rand_seq[(idx + SEGMENT_SIZE) % rand_seq.size()] * num_segments + seg_idx;
-                }
-                h_neighbor_list[j].id_with_flag() = id;
-                h_dist_list[j] = FLT_MAX;
-            }
-        }
-    }
-}
-
-template<typename Index_t>
 void GnndGraph<Index_t>::init_random_graph(raft::host_vector_view<uint32_t> segment_start_view,
                                            raft::host_vector_view<uint32_t> segment_length_view) {
-//    std::cout<<"init_random_graph"<<std::endl;
     uint32_t segment = segment_start_view.extent(0);
     for (uint32_t seg_idx = 0; seg_idx < num_segments; seg_idx++) {
         std::vector<std::vector<Index_t>> rand_seq(segment);
@@ -1111,7 +1031,6 @@ void GnndGraph<Index_t>::init_random_graph(raft::host_vector_view<uint32_t> segm
                          seg_idx;
                 }
                 h_neighbor_list[j].id_with_flag() = id - segment_start_view(segment_id);
-//                h_neighbor_list[j].id_with_flag() = id;
                 h_dist_list[j] = FLT_MAX;
             }
         }
@@ -1120,7 +1039,6 @@ void GnndGraph<Index_t>::init_random_graph(raft::host_vector_view<uint32_t> segm
 
 template<typename Index_t>
 void GnndGraph<Index_t>::sample_graph(bool sample_new) {
-//    std::cout<<"sample_graph"<<std::endl;
 #pragma omp parallel for
     for (uint32_t i = 0; i < nrow; i++) {
         h_list_sizes_old[i].x = 0;
@@ -1154,7 +1072,6 @@ void GnndGraph<Index_t>::sample_graph(bool sample_new) {
 
 template<typename Index_t>
 void GnndGraph<Index_t>::sample_segment_graph(int segment_start, int segment_end, bool sample_new) {
-//    std::cout<<"sample_segment_graph"<<std::endl;
 #pragma omp parallel for
     for (uint32_t i = segment_start; i < segment_end; i++) {
         h_list_sizes_old[i].x = 0;
@@ -1191,7 +1108,6 @@ void GnndGraph<Index_t>::update_graph(const InternalID_t<Index_t> *new_neighbors
                                       const DistData_t *new_dists,
                                       const uint32_t width,
                                       std::atomic<int64_t> &update_counter) {
-//    std::cout<<"update_graph"<<std::endl;
 #pragma omp parallel for
     for (uint32_t i = 0; i < nrow; i++) {
         for (uint32_t j = 0; j < width; j++) {
@@ -1215,7 +1131,6 @@ void GnndGraph<Index_t>::update_segment_graph(const InternalID_t<Index_t> *new_n
                                               const uint32_t width,
                                               std::atomic<int64_t> &update_counter,
                                               int segment_start, int segment_end) {
-//    std::cout<<"update_segment_graph"<<std::endl;
 #pragma omp parallel for
     for (uint32_t i = segment_start; i < segment_end; i++) {
         for (uint32_t j = 0; j < width; j++) {
@@ -1234,26 +1149,7 @@ void GnndGraph<Index_t>::update_segment_graph(const InternalID_t<Index_t> *new_n
 }
 
 template<typename Index_t>
-void GnndGraph<Index_t>::sort_lists() {
-#pragma omp parallel for
-    for (size_t i = 0; i < nrow; i++) {
-        std::vector<std::pair<DistData_t, Index_t>> new_list;
-        for (size_t j = 0; j < node_degree; j++) {
-            new_list.emplace_back(h_dists.data_handle()[i * node_degree + j],
-                                  h_graph[i * node_degree + j].id());
-        }
-        std::sort(new_list.begin(), new_list.end());
-        for (size_t j = 0; j < node_degree; j++) {
-            h_graph[i * node_degree + j].id_with_flag() = new_list[j].second;
-            h_dists.data_handle()[i * node_degree + j] = new_list[j].first;
-        }
-    }
-}
-
-template<typename Index_t>
 void GnndGraph<Index_t>::clear() {
-//    std::cout<<"clear"<<std::endl;
-//    bloom_filter.clear();
     for(int i=0;i<segment_num;i++){
         bloom_filter[i].clear();
     }
@@ -1306,17 +1202,6 @@ void GNND<Data_t, Index_t>::add_reverse_edges(Index_t *graph_ptr,
                                               Index_t *h_rev_graph_ptr,
                                               Index_t *d_rev_graph_ptr,
                                               int2 *list_sizes,
-                                              cudaStream_t stream) {
-    add_rev_edges_kernel<<<nrow_, warp_size(), 0, stream>>>(
-            graph_ptr, d_rev_graph_ptr, NUM_SAMPLES, list_sizes);
-    raft::copy(h_rev_graph_ptr, d_rev_graph_ptr, nrow_ * NUM_SAMPLES, stream);
-}
-
-template<typename Data_t, typename Index_t>
-void GNND<Data_t, Index_t>::add_reverse_edges(Index_t *graph_ptr,
-                                              Index_t *h_rev_graph_ptr,
-                                              Index_t *d_rev_graph_ptr,
-                                              int2 *list_sizes,
                                               int segment_start,
                                               int segment_length,
                                               cudaStream_t stream) {
@@ -1325,29 +1210,6 @@ void GNND<Data_t, Index_t>::add_reverse_edges(Index_t *graph_ptr,
             NUM_SAMPLES, list_sizes + segment_start);
     raft::copy(h_rev_graph_ptr + segment_start * NUM_SAMPLES, d_rev_graph_ptr + segment_start * NUM_SAMPLES,
                segment_length * NUM_SAMPLES, stream);
-}
-
-template<typename Data_t, typename Index_t>
-void GNND<Data_t, Index_t>::local_join(cudaStream_t stream) {
-    thrust::fill(thrust::device.on(stream),
-                 dists_buffer_.data_handle(),
-                 dists_buffer_.data_handle() + dists_buffer_.size(),
-                 FLT_MAX);
-    local_join_kernel<<<nrow_, BLOCK_SIZE, 0, stream>>>(
-            thrust::raw_pointer_cast(graph_.h_graph_new.data()),
-            thrust::raw_pointer_cast(h_rev_graph_new_.data()),
-            d_list_sizes_new_.data_handle(),
-            thrust::raw_pointer_cast(h_graph_old_.data()),
-            thrust::raw_pointer_cast(h_rev_graph_old_.data()),
-            d_list_sizes_old_.data_handle(),
-            NUM_SAMPLES,
-            d_data_.data_handle(),
-            ndim_,
-            graph_buffer_.data_handle(),
-            dists_buffer_.data_handle(),
-            DEGREE_ON_DEVICE,
-            d_locks_.data_handle(),
-            l2_norms_.data_handle());
 }
 
 template<typename Data_t, typename Index_t>
@@ -1373,308 +1235,9 @@ void GNND<Data_t, Index_t>::local_join(int segment_start, int segment_length, cu
             l2_norms_.data_handle() + segment_start);
 }
 
-//template<typename Data_t, typename Index_t>
-//void GNND<Data_t, Index_t>::build(const Data_t *data, uint32_t nrow, Index_t *output_graph, uint32_t graph_degree,
-//                                  raft::host_vector_view<uint32_t> segment_start_view,
-//                                  raft::host_vector_view<uint32_t> segment_length_view) {
-//    cudaStream_t stream = raft::resource::get_cuda_stream(handle);
-//    nrow_ = nrow;
-//    graph_.h_graph = (InternalID_t<Index_t> *) output_graph;
-//
-//    uint32_t shared_mem_for_preprocess =
-//            sizeof(Data_t) * ceildiv(build_config_.dataset_dim, static_cast<uint32_t>(warp_size())) * warp_size();
-//    preprocess_data_kernel<<<nrow_, warp_size(), shared_mem_for_preprocess, stream>>>(data, d_data_.data_handle(),
-//                                                                                      build_config_.dataset_dim,
-//                                                                                      l2_norms_.data_handle());
-//    thrust::fill(thrust::device.on(stream),
-//                 (Index_t *) graph_buffer_.data_handle(),
-//                 (Index_t *) graph_buffer_.data_handle() + graph_buffer_.size(),
-//                 INT_MAX);
-//
-//    graph_.clear();
-//    graph_.init_random_graph();
-//    graph_.sample_graph(true);
-//
-//    auto update_and_sample = [&](bool update_graph) {
-//        if (update_graph) {
-//            update_counter_ = 0;
-//            graph_.update_graph(thrust::raw_pointer_cast(graph_host_buffer_.data()),
-//                                thrust::raw_pointer_cast(dists_host_buffer_.data()),
-//                                DEGREE_ON_DEVICE,
-//                                update_counter_);
-//            if (update_counter_ < build_config_.termination_threshold * nrow_ *
-//                                  build_config_.dataset_dim / counter_interval) {
-//                update_counter_ = -1;
-//            }
-//        }
-//        graph_.sample_graph(false);
-//    };
-//
-//    uint32_t it;
-//    for (it = 0; it < build_config_.max_iterations; it++) {
-//        raft::copy(d_list_sizes_new_.data_handle(),
-//                   thrust::raw_pointer_cast(graph_.h_list_sizes_new.data()),
-//                   nrow_,
-//                   raft::resource::get_cuda_stream(handle));
-//        raft::copy(thrust::raw_pointer_cast(h_graph_old_.data()),
-//                   thrust::raw_pointer_cast(graph_.h_graph_old.data()),
-//                   nrow_ * NUM_SAMPLES,
-//                   raft::resource::get_cuda_stream(handle));
-//        raft::copy(d_list_sizes_old_.data_handle(),
-//                   thrust::raw_pointer_cast(graph_.h_list_sizes_old.data()),
-//                   nrow_,
-//                   raft::resource::get_cuda_stream(handle));
-//        raft::resource::sync_stream(handle);
-//
-//        std::thread update_and_sample_thread(update_and_sample, it);
-//
-//        static_assert(DEGREE_ON_DEVICE * sizeof(*(dists_buffer_.data_handle())) >=
-//                      NUM_SAMPLES * sizeof(*(graph_buffer_.data_handle())));
-//        add_reverse_edges(thrust::raw_pointer_cast(graph_.h_graph_new.data()),
-//                          thrust::raw_pointer_cast(h_rev_graph_new_.data()),
-//                          (Index_t *) dists_buffer_.data_handle(),
-//                          d_list_sizes_new_.data_handle(),
-//                          stream);
-//        add_reverse_edges(thrust::raw_pointer_cast(h_graph_old_.data()),
-//                          thrust::raw_pointer_cast(h_rev_graph_old_.data()),
-//                          (Index_t *) dists_buffer_.data_handle(),
-//                          d_list_sizes_old_.data_handle(),
-//                          stream);
-//
-//        local_join(stream);
-//
-//        update_and_sample_thread.join();
-//
-//        raft::resource::sync_stream(handle);
-//
-//        if (update_counter_ == -1) { break; }
-//
-//        raft::copy(thrust::raw_pointer_cast(graph_host_buffer_.data()),
-//                   graph_buffer_.data_handle(),
-//                   nrow_ * DEGREE_ON_DEVICE,
-//                   raft::resource::get_cuda_stream(handle));
-//        raft::copy(thrust::raw_pointer_cast(dists_host_buffer_.data()),
-//                   dists_buffer_.data_handle(),
-//                   nrow_ * DEGREE_ON_DEVICE,
-//                   raft::resource::get_cuda_stream(handle));
-//        raft::resource::sync_stream(handle);
-//
-//        graph_.sample_graph_new(thrust::raw_pointer_cast(graph_host_buffer_.data()), DEGREE_ON_DEVICE);
-//    }
-//
-//    graph_.update_graph(thrust::raw_pointer_cast(graph_host_buffer_.data()),
-//                        thrust::raw_pointer_cast(dists_host_buffer_.data()),
-//                        DEGREE_ON_DEVICE,
-//                        update_counter_);
-//
-//    static_assert(sizeof(decltype(*(graph_.h_dists.data_handle()))) >= sizeof(Index_t));
-//    Index_t *graph_shrink_buffer = (Index_t *) graph_.h_dists.data_handle();
-//
-//#pragma omp parallel for
-//    for (uint32_t i = 0; i < nrow_; i++) {
-//        for (uint32_t j = 0; j < build_config_.node_degree; j++) {
-//            uint32_t idx = i * graph_.node_degree + j;
-//            uint32_t id = graph_.h_graph[idx].id();
-//            if (id < nrow_) {
-//                graph_shrink_buffer[i * build_config_.node_degree + j] = id;
-//            } else {
-//                graph_shrink_buffer[i * build_config_.node_degree + j] = xorshift32(idx) % nrow_;
-//            }
-//        }
-//    }
-//    graph_.h_graph = nullptr;
-//
-//    uint32_t segment = segment_start_view.extent(0);
-//#pragma omp parallel for
-//    for (uint32_t i = 0; i < nrow_; i++) {
-//        uint32_t segment_id = 0;
-//        for (; segment_id < segment; segment_id++) {
-//            uint32_t segment_end = segment_start_view(segment_id) + segment_length_view(segment_id);
-//            if (i < segment_end) break;
-//        }
-//        for (uint32_t j = 0; j < graph_degree; j++) {
-//            output_graph[i * graph_degree + j] =
-//                    graph_shrink_buffer[i * build_config_.node_degree + j];
-//        }
-//    }
-//}
-
-//template<typename Data_t, typename Index_t>
-//void GNND<Data_t, Index_t>::build(raft::device_matrix_view<float> d_reorder_data_view,
-//                                  uint32_t nrow, Index_t *output_graph,
-//                                  uint32_t graph_degree,
-//                                  raft::host_vector_view<uint32_t> segment_start_view,
-//                                  raft::host_vector_view<uint32_t> segment_length_view) {
-//    nrow_ = nrow;
-//    graph_.h_graph = (InternalID_t<Index_t> *) output_graph;
-//
-//    for (uint32_t i = 0; i < segment_start_view.size(); i++) {
-//        update_counter_.emplace_back(std::make_unique<std::atomic<int64_t>>(0));
-//    }
-//
-//    uint32_t shared_mem_for_preprocess =
-//            sizeof(Data_t) * ceildiv(build_config_.dataset_dim, static_cast<uint32_t>(warp_size())) * warp_size();
-//    preprocess_data_kernel<<<nrow_, warp_size(), shared_mem_for_preprocess, raft::resource::get_stream_from_stream_pool(
-//            handle)>>>(d_reorder_data_view.data_handle(),
-//                       d_data_.data_handle(),
-//                       build_config_.dataset_dim,
-//                       l2_norms_.data_handle());
-////    std::cout<<"preprocess_data_kernel done"<<std::endl;
-//
-//    thrust::fill(thrust::device.on(raft::resource::get_stream_from_stream_pool(handle)),
-//                 (Index_t *) graph_buffer_.data_handle(),
-//                 (Index_t *) graph_buffer_.data_handle() + graph_buffer_.size(), INT_MAX);
-//
-//    graph_.clear();
-//    graph_.init_random_graph(segment_start_view, segment_length_view);
-//    graph_.sample_graph(true);
-////    std::cout<<"init_random_graph done"<<std::endl;
-//
-//    cudaDeviceSynchronize();
-//
-//    auto update_and_sample = [&](bool update_graph, int segment_id, int segment_start, int segment_length) {
-//        if (*update_counter_[segment_id] == -1) {
-//            return;
-//        }
-//        if (update_graph) {
-//            *update_counter_[segment_id] = 0;
-//            graph_.update_segment_graph(thrust::raw_pointer_cast(graph_host_buffer_.data()),
-//                                        thrust::raw_pointer_cast(dists_host_buffer_.data()),
-//                                        DEGREE_ON_DEVICE,
-//                                        *update_counter_[segment_id], segment_start, segment_length);
-//            if (*update_counter_[segment_id] < build_config_.termination_threshold * nrow_ *
-//                                               build_config_.dataset_dim / counter_interval) {
-//                *update_counter_[segment_id] = -1;
-//            }
-//        }
-//        graph_.sample_segment_graph(segment_start, segment_start + segment_length, false);
-////        std::cout<<"update_and_sample done"<<std::endl;
-//    };
-//
-//    uint32_t it;
-//    for (it = 0; it < build_config_.max_iterations; it++) {
-////        std::cout<<"iteration "<<it<<std::endl;
-//        raft::copy(d_list_sizes_new_.data_handle(),
-//                   thrust::raw_pointer_cast(graph_.h_list_sizes_new.data()),
-//                   nrow_,
-//                   raft::resource::get_stream_from_stream_pool(handle));
-//        raft::copy(thrust::raw_pointer_cast(h_graph_old_.data()),
-//                   thrust::raw_pointer_cast(graph_.h_graph_old.data()),
-//                   nrow_ * NUM_SAMPLES,
-//                   raft::resource::get_stream_from_stream_pool(handle));
-//        raft::copy(d_list_sizes_old_.data_handle(),
-//                   thrust::raw_pointer_cast(graph_.h_list_sizes_old.data()),
-//                   nrow_,
-//                   raft::resource::get_stream_from_stream_pool(handle));
-//        cudaDeviceSynchronize();
-//
-//        std::vector<std::thread> threads;
-//
-//        for (uint32_t segment_id = 0; segment_id < segment_start_view.size(); segment_id++) {
-//            if(*update_counter_[segment_id] == -1){
-//                continue;
-//            }
-//            cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
-//
-//            threads.emplace_back([&, segment_id, stream](){
-//                cudaSetDevice(1);
-//                std::thread update_and_sample_thread(update_and_sample, it, segment_id,
-//                                                     segment_start_view(segment_id), segment_length_view(segment_id));
-//
-//                add_reverse_edges(thrust::raw_pointer_cast(graph_.h_graph_new.data()),
-//                                  thrust::raw_pointer_cast(h_rev_graph_new_.data()),
-//                                  (Index_t *) dists_buffer_.data_handle(),
-//                                  d_list_sizes_new_.data_handle(),
-//                                  segment_start_view(segment_id),
-//                                  segment_length_view(segment_id),
-//                                  stream);
-//                add_reverse_edges(thrust::raw_pointer_cast(h_graph_old_.data()),
-//                                  thrust::raw_pointer_cast(h_rev_graph_old_.data()),
-//                                  (Index_t *) dists_buffer_.data_handle(),
-//                                  d_list_sizes_old_.data_handle(),
-//                                  segment_start_view(segment_id),
-//                                  segment_length_view(segment_id),
-//                                  stream);
-//                local_join(segment_start_view(segment_id), segment_length_view(segment_id), stream);
-////                std::cout<<"cuda done"<<std::endl;
-//
-//                update_and_sample_thread.join();
-//                cudaStreamSynchronize(stream);
-//            });
-//        }
-//
-//        for (auto &thread : threads) {
-//            thread.join();
-//        }
-//        bool flag = true;
-//        for(auto &counter : update_counter_) {
-//            if (*counter != -1) {
-//                flag = false;
-//                break;
-//            }
-//        }
-//        if(flag) { break;}
-//
-//        raft::copy(thrust::raw_pointer_cast(graph_host_buffer_.data()),
-//                   graph_buffer_.data_handle(),
-//                   nrow_ * DEGREE_ON_DEVICE,
-//                   raft::resource::get_stream_from_stream_pool(handle));
-//        raft::copy(thrust::raw_pointer_cast(dists_host_buffer_.data()),
-//                   dists_buffer_.data_handle(),
-//                   nrow_ * DEGREE_ON_DEVICE,
-//                   raft::resource::get_stream_from_stream_pool(handle));
-//        cudaDeviceSynchronize();
-//
-////        graph_.sample_graph_new(thrust::raw_pointer_cast(graph_host_buffer_.data()), DEGREE_ON_DEVICE);
-//        graph_.sample_graph_new(thrust::raw_pointer_cast(graph_host_buffer_.data()), DEGREE_ON_DEVICE,
-//                                segment_start_view, segment_length_view);
-////        std::cout<<"sample_graph_new done"<<std::endl;
-//    }
-//
-//    graph_.update_graph(thrust::raw_pointer_cast(graph_host_buffer_.data()),
-//                        thrust::raw_pointer_cast(dists_host_buffer_.data()),
-//                        DEGREE_ON_DEVICE,
-//                        *update_counter_[0]);
-////    std::cout<<"update_graph done"<<std::endl;
-//
-//    static_assert(sizeof(decltype(*(graph_.h_dists.data_handle()))) >= sizeof(Index_t));
-//    Index_t *graph_shrink_buffer = (Index_t *) graph_.h_dists.data_handle();
-//
-//    uint32_t segment = segment_start_view.extent(0);
-//#pragma omp parallel for
-//    for (uint32_t i = 0; i < nrow_; i++) {
-//        uint32_t segment_id = 0;
-//        for (; segment_id < segment; segment_id++) {
-//            uint32_t segment_end = segment_start_view(segment_id) + segment_length_view(segment_id);
-//            if (i < segment_end) break;
-//        }
-//        for (uint32_t j = 0; j < build_config_.node_degree; j++) {
-//            uint32_t idx = i * graph_.node_degree + j;
-//            uint32_t id = graph_.h_graph[idx].id();
-//            if (id < nrow_) {
-//                graph_shrink_buffer[i * build_config_.node_degree + j] = id;
-//            } else {
-//                graph_shrink_buffer[i * build_config_.node_degree + j] = xorshift32(idx) % segment_length_view(segment_id);
-//            }
-//        }
-//    }
-//    graph_.h_graph = nullptr;
-////    std::cout<<"graph shrink done"<<std::endl;
-//
-//#pragma omp parallel for
-//    for (uint32_t i = 0; i < nrow_; i++) {
-//        for (uint32_t j = 0; j < graph_degree; j++) {
-//            output_graph[i * graph_degree + j] =
-//                    graph_shrink_buffer[i * build_config_.node_degree + j];
-//        }
-//    }
-//
-////    std::cout<<"build done"<<std::endl;
-//}
-
 template<typename Data_t, typename Index_t>
-void GNND<Data_t, Index_t>::build(std::optional<raft::device_matrix<float>> &data, uint32_t nrow,
-                                  Index_t *output_graph, uint32_t graph_degree,
+void GNND<Data_t, Index_t>::build(std::optional<raft::device_matrix<Data_t>> &data, uint32_t nrow,
+                                  Index_t *output_graph,
                                   raft::host_vector_view<uint32_t> h_segment_start_view,
                                   raft::host_vector_view<uint32_t> h_segment_length_view) {
     nrow_ = nrow;
@@ -1797,7 +1360,9 @@ void GNND<Data_t, Index_t>::build(std::optional<raft::device_matrix<float>> &dat
                    raft::resource::get_stream_from_stream_pool(handle));
         cudaDeviceSynchronize();
 
-        graph_.sample_graph_new(thrust::raw_pointer_cast(graph_host_buffer_.data()), DEGREE_ON_DEVICE);
+        graph_.sample_graph_new(thrust::raw_pointer_cast(graph_host_buffer_.data()), DEGREE_ON_DEVICE,
+                                h_segment_start_view, h_segment_length_view);
+//        graph_.sample_graph_new(thrust::raw_pointer_cast(graph_host_buffer_.data()), DEGREE_ON_DEVICE);
     }
 
     graph_.update_graph(thrust::raw_pointer_cast(graph_host_buffer_.data()),
@@ -1808,20 +1373,6 @@ void GNND<Data_t, Index_t>::build(std::optional<raft::device_matrix<float>> &dat
     static_assert(sizeof(decltype(*(graph_.h_dists.data_handle()))) >= sizeof(Index_t));
     Index_t *graph_shrink_buffer = (Index_t *) graph_.h_dists.data_handle();
 
-#pragma omp parallel for
-    for (uint32_t i = 0; i < nrow_; i++) {
-        for (uint32_t j = 0; j < build_config_.node_degree; j++) {
-            uint32_t idx = i * graph_.node_degree + j;
-            uint32_t id = graph_.h_graph[idx].id();
-            if (id < nrow_) {
-                graph_shrink_buffer[i * build_config_.node_degree + j] = id;
-            } else {
-                graph_shrink_buffer[i * build_config_.node_degree + j] = xorshift32(idx) % nrow_;
-            }
-        }
-    }
-    graph_.h_graph = nullptr;
-
     uint32_t segment_num = h_segment_start_view.extent(0);
 #pragma omp parallel for
     for (uint32_t i = 0; i < nrow_; i++) {
@@ -1830,16 +1381,31 @@ void GNND<Data_t, Index_t>::build(std::optional<raft::device_matrix<float>> &dat
             uint32_t segment_end = h_segment_start_view(segment_id) + h_segment_length_view(segment_id);
             if (i < segment_end) break;
         }
-        for (uint32_t j = 0; j < graph_degree; j++) {
-            output_graph[i * graph_degree + j] =
+        for (uint32_t j = 0; j < build_config_.node_degree; j++) {
+            uint32_t idx = i * graph_.node_degree + j;
+            uint32_t id = graph_.h_graph[idx].id();
+            if (id < h_segment_length_view(segment_id)) {
+                graph_shrink_buffer[i * build_config_.node_degree + j] = id;
+            } else {
+                graph_shrink_buffer[i * build_config_.node_degree + j] = xorshift32(idx) % h_segment_length_view(segment_id);
+            }
+        }
+    }
+    graph_.h_graph = nullptr;
+
+#pragma omp parallel for
+    for (uint32_t i = 0; i < nrow_; i++) {
+        for (uint32_t j = 0; j < build_config_.node_degree; j++) {
+            output_graph[i * build_config_.node_degree + j] =
                     graph_shrink_buffer[i * build_config_.node_degree + j];
         }
     }
 }
 
+template<typename Data_t>
 raft::host_matrix<int>
 build_nnd(raft::resources const &handle, NNDescentParameter &param,
-          std::optional<raft::device_matrix<float>> &d_data,
+          std::optional<raft::device_matrix<Data_t>> &d_data,
           raft::host_vector_view<uint32_t> h_segment_start_view,
           raft::host_vector_view<uint32_t> h_segment_length_view,
           std::string &result_file) {
@@ -1863,20 +1429,30 @@ build_nnd(raft::resources const &handle, NNDescentParameter &param,
     uint32_t extended_intermediate_graph_degree = roundUp32(
             static_cast<uint32_t>(intermediate_graph_degree * (intermediate_graph_degree <= 32 ? 1.0 : 1.3)));
 
-    auto nnd_graph = raft::make_host_matrix<int, uint32_t, raft::row_major>(num, extended_graph_degree);
+    auto int_graph = raft::make_host_matrix<int, uint32_t, raft::row_major>(num, extended_graph_degree);
+    auto nnd_graph = raft::make_host_matrix<int>(num, graph_degree);
 
     BuildConfig build_config{.max_dataset_size      = num,
             .dataset_dim           = dim,
             .node_degree           = extended_graph_degree,
             .internal_node_degree  = extended_intermediate_graph_degree,
             .max_iterations        = param.max_iterations,
-            .termination_threshold = param.termination_threshold};
+            .termination_threshold = param.termination_threshold,
+            .segment_num           = h_segment_start_view.extent(0),
+            .segment_length        = h_segment_length_view.data_handle(),};
 
-    GNND<float, int> nnd(handle, build_config);
+    GNND<Data_t, int> nnd(handle, build_config);
 
     cudaEventRecord(start_time);
-    nnd.build(d_data, num, nnd_graph.data_handle(), graph_degree,
+    nnd.build(d_data, num, int_graph.data_handle(),
               h_segment_start_view, h_segment_length_view);
+
+#pragma omp parallel for
+    for (size_t i = 0; i < num; i++) {
+        for (size_t j = 0; j < graph_degree; j++) {
+            nnd_graph(i, j) = int_graph(i, j);
+        }
+    }
     cudaEventRecord(stop_time);
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
@@ -1890,53 +1466,58 @@ build_nnd(raft::resources const &handle, NNDescentParameter &param,
     return nnd_graph;
 }
 
-//raft::host_matrix<int> build_knn(raft::resources const &handle, NNDescentParameter &param, IndexParameter &build_param,
-//                                 raft::device_matrix_view<const float> d_reorder_data_view) {
-//    using namespace cuvs::neighbors;
-//    uint32_t segment = build_param.segment_start_view.extent(0);
-//    uint32_t dim = d_reorder_data_view.extent(1);
-//    uint32_t num = d_reorder_data_view.extent(0);
-//
-//    auto knn_graph = raft::make_host_matrix<int>(num, build_param.knn_degree);
-//
-//    for (uint32_t i = 0; i < segment; i++) {
-//        uint32_t length = build_param.segment_length_view(i);
-//        uint32_t start = build_param.segment_start_view(i);
-//
-//        auto sub_dataset = raft::make_device_matrix<float, int64_t>(handle, length, dim);
-//        raft::copy(sub_dataset.data_handle(), d_reorder_data_view.data_handle() + start * dim, length * dim,
-//                   raft::resource::get_cuda_stream(handle));
-//
-//        raft::device_matrix_view<const float, int64_t> data = sub_dataset.view();
-//
-//        cagra::index_params index_params;
-//        index_params.graph_degree = build_param.knn_degree;
-//        index_params.intermediate_graph_degree = build_param.knn_degree;
-//
-//        auto knn_build_params = index_params.graph_build_params;
-//        knn_build_params = cagra::graph_build_params::nn_descent_params(index_params.intermediate_graph_degree);
-//
-//        auto nn_descent_params =
-//                std::get<cagra::graph_build_params::nn_descent_params>(knn_build_params);
-//        if (nn_descent_params.graph_degree != index_params.intermediate_graph_degree) {
-//            nn_descent_params = cagra::graph_build_params::nn_descent_params(index_params.intermediate_graph_degree);
-//        }
-//
-//        auto index = nn_descent::build(handle, nn_descent_params, data);
-//
-//        raft::copy(knn_graph.data_handle() + start * index_params.intermediate_graph_degree,
-//                   reinterpret_cast<int *>(index.graph().data_handle()),
-//                   length * index_params.intermediate_graph_degree,
-//                   raft::resource::get_cuda_stream(handle));
-//    }
-//    return knn_graph;
-//}
+raft::host_matrix<int>
+build_knn(raft::resources const &handle, uint32_t knn_degree,
+          raft::host_vector_view<uint32_t> h_segment_start_view,
+          raft::host_vector_view<uint32_t> h_segment_length_view,
+          raft::device_matrix_view<float> d_reorder_data_view) {
+    using namespace cuvs::neighbors;
+    uint32_t segment = h_segment_start_view.extent(0);
+    uint32_t dim = d_reorder_data_view.extent(1);
+    uint32_t num = d_reorder_data_view.extent(0);
 
-raft::host_matrix<int, uint64_t>
+    auto knn_graph = raft::make_host_matrix<int>(num, knn_degree);
+
+#pragma omp parallel for
+    for (uint32_t i = 0; i < segment; i++) {
+        uint32_t length = h_segment_length_view(i);
+        uint32_t start = h_segment_start_view(i);
+
+        auto sub_dataset = raft::make_device_matrix<float, int64_t>(handle, length, dim);
+        raft::copy(sub_dataset.data_handle(), d_reorder_data_view.data_handle() + start * dim, length * dim,
+                   raft::resource::get_cuda_stream(handle));
+
+        raft::device_matrix_view<const float, int64_t> data = sub_dataset.view();
+
+        cagra::index_params index_params;
+        index_params.graph_degree = knn_degree;
+        index_params.intermediate_graph_degree = knn_degree;
+
+        auto knn_build_params = index_params.graph_build_params;
+        knn_build_params = cagra::graph_build_params::nn_descent_params(index_params.intermediate_graph_degree);
+
+        auto nn_descent_params =
+                std::get<cagra::graph_build_params::nn_descent_params>(knn_build_params);
+        if (nn_descent_params.graph_degree != index_params.intermediate_graph_degree) {
+            nn_descent_params = cagra::graph_build_params::nn_descent_params(index_params.intermediate_graph_degree);
+        }
+
+        auto index = nn_descent::build(handle, nn_descent_params, data);
+
+        raft::copy(knn_graph.data_handle() + start * index_params.intermediate_graph_degree,
+                   reinterpret_cast<int *>(index.graph().data_handle()),
+                   length * index_params.intermediate_graph_degree,
+                   raft::resource::get_cuda_stream(handle));
+    }
+    return knn_graph;
+}
+
+template<typename Data_t, typename Index_t>
+raft::host_matrix<int, Index_t>
 build_knn_for_large(raft::resources const &handle, uint32_t knn_degree,
                     raft::host_vector_view<uint32_t> h_segment_start_view,
                     raft::host_vector_view<uint32_t> h_segment_length_view,
-                    raft::host_matrix_view<uint8_t, uint64_t> h_reorder_data_view, std::string &result_file) {
+                    raft::host_matrix_view<Data_t, Index_t> h_reorder_data_view, std::string &result_file) {
     using namespace cuvs::neighbors;
     uint32_t segment = h_segment_start_view.extent(0);
     uint32_t dim = h_reorder_data_view.extent(1);
@@ -1948,22 +1529,22 @@ build_knn_for_large(raft::resources const &handle, uint32_t knn_degree,
     cudaEventCreate(&start_time);
     cudaEventCreate(&stop_time);
 
-    auto knn_graph = raft::make_host_matrix<int, uint64_t>(num, knn_degree);
+    auto knn_graph = raft::make_host_matrix<int, Index_t>(num, knn_degree);
 
     for (uint32_t i = 0; i < segment; i++) {
         uint32_t length = h_segment_length_view(i);
         uint32_t start = h_segment_start_view(i);
 
-        uint64_t data_start = static_cast<uint64_t>(start) * dim;
-        uint64_t data_length = static_cast<uint64_t>(length) * dim;
-        uint64_t knn_start = static_cast<uint64_t>(start) * knn_degree;
-        uint64_t knn_length = static_cast<uint64_t>(length) * knn_degree;
+        Index_t data_start = static_cast<Index_t>(start) * dim;
+        Index_t data_length = static_cast<Index_t>(length) * dim;
+        Index_t knn_start = static_cast<Index_t>(start) * knn_degree;
+        Index_t knn_length = static_cast<Index_t>(length) * knn_degree;
 
-        auto sub_dataset = raft::make_host_matrix<uint8_t, uint64_t>(length, dim);
-        raft::copy(sub_dataset.data_handle(), h_reorder_data_view.data_handle() + data_start, data_length,
-                   raft::resource::get_cuda_stream(handle));
+        auto sub_dataset = raft::make_host_matrix<Data_t, Index_t>(length, dim);
+        raft::copy(sub_dataset.data_handle(), h_reorder_data_view.data_handle() + data_start,
+                   data_length, raft::resource::get_cuda_stream(handle));
 
-        raft::host_matrix_view<const uint8_t, uint64_t> data = sub_dataset.view();
+        raft::host_matrix_view<const Data_t, Index_t> data = sub_dataset.view();
 
         cagra::index_params index_params;
         index_params.graph_degree = knn_degree;

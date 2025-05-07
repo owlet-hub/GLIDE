@@ -35,7 +35,7 @@ struct IndexParameter {
 };
 
 struct SearchParameter {
-    uint32_t topk = 100;
+    uint32_t top_k = 10;
     uint32_t beam = 100;
     uint32_t max_iterations = 0;
     uint32_t min_iterations = 0;
