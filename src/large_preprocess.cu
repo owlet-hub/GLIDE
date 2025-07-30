@@ -49,6 +49,10 @@ int main(int argc, char **argv) {
         partition_param.metric = Metric::Cosine;
     }
 
+    std::ofstream result_out(result_file, std::ios::app);
+    result_out << "pre_time,knn_time,degree,index_time,beam,search_time,QPS,recall" << std::endl;
+    result_out.close();
+
     auto h_data = load_matrix_data<uint8_t, uint64_t>(data_file);
     uint32_t num = h_data.extent(0);
     uint32_t dim = h_data.extent(1);

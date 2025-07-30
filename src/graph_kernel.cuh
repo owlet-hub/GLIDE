@@ -226,12 +226,13 @@ map_to_graph_boundary(uint32_t *graph, uint32_t *s_graph, uint32_t *neighbor_buf
         uint32_t need_num = (valid_boundary_num < max_need_size) ? valid_boundary_num : max_need_size;
         uint32_t valid_pos_num = 0;
         for (uint32_t i = threadIdx.x; i < max_graph_degree; i += warpSize) {
-            uint32_t graph_index = (i / 32) * 32 + 31 - i % 32;
+            uint32_t graph_index = max_graph_degree - 1 - i;
+            uint32_t in_range = (graph_index < graph_degree) ? 1 : 0;
             uint32_t repetitive = (bitmap[graph_index / 32] & (1 << (graph_index % 32))) ? 1 : 0;
-            uint32_t invalid = (graph_index < graph_degree && s_graph[graph_index] == get_max_value<uint32_t>()) ? 1
-                                                                                                                 : 0;
-            uint32_t ballot_mask = __ballot_sync(warp_full_mask(), invalid || !repetitive);
-            if (invalid || !repetitive) {
+            uint32_t invalid = (s_graph[graph_index] == get_max_value<uint32_t>()) ? 1: 0;
+
+            uint32_t ballot_mask = __ballot_sync(warp_full_mask(), (in_range && (invalid || !repetitive)));
+            if (in_range && (invalid || !repetitive)) {
                 uint32_t position = __popc(ballot_mask & ((1 << threadIdx.x) - 1)) + valid_pos_num;
                 if (position < need_num) {
                     graph[graph_index] = neighbor_buffer[position];
