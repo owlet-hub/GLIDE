@@ -2,7 +2,7 @@ data_file='./datasets/sift_learn.fbin'
 query_file='./datasets/sift_query.fbin'
 truth_file='./datasets/sift_query_learn_gt100'
 result_file='result.csv'
-dataset='sift1m'
+dataset='sift100k'
 
 metric=Euclidean
 
