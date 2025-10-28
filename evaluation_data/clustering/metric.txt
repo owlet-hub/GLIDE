@@ -1,0 +1,6 @@
+latency: time consumption for clustering
+memory: Peak memory consumption for clustering
+LCP: the average overlap between each point k nearest neighbors in the entire and clustering spaces
+Entropy: the degree of balance, computed from the distribution of sizes across all clusters
+
+Note that when the clustering is highly unbalanced, i.e., the entropy approaches 0, the computation of LCP becomes meaningless.

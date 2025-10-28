@@ -1,0 +1,8 @@
+The construction target for GPU-based methods on different datasets: recall / latency.
+
+SIFT1M: 0.95 / 6ms
+GIST1M: 0.9 / 30ms
+DEEP1M: 0.95 / 5ms
+SIFT10M: 0.95 / 15ms
+NYTimes: 0.9 / 60ms
+GloVe-200: 0.85 / 80ms
