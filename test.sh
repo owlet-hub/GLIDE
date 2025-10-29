@@ -8,7 +8,7 @@ metric=Euclidean
 
 #preprocess
 centroid_num=10
-boundary_factor=1.05
+boundary_factor=1.04
 sample_factor=0.01
 #build
 knn_degree=32

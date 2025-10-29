@@ -85,6 +85,17 @@ public:
                 raft::host_matrix_view<float> h_result_distances_view,
                 std::string &result_file);
 
+    /**
+     * @brief Build the merged GLIDE index
+     *
+     * @param build_param Index building parameter
+     * @param search_param_knn Search parameter for build
+     * @param h_knn_graph_view Host matrix view of KNN graph (num × knn_degree)
+     * @param result_file Result file path
+     */
+    void build_with_merge(IndexParameter &build_param, SearchParameter &search_param_knn,
+                          raft::host_matrix_view<uint32_t, Index_t> h_knn_graph_view, std::string &result_file);
+
     // Accessor methods with inline documentation
     /** @brief Get data dimensionality */
     uint32_t dim() {
@@ -161,15 +172,15 @@ protected:
     void start_point_select(float &build_time);
 
     /**
-     * @brief Build and merge subgraphs
+     * @brief Build subgraphs
      *
      * @param param Search parameter for build
      * @param relaxant_factor Relaxation factor for pruning
      * @param build_time Reference to accumulate build time
      * @param h_knn_graph_view Host matrix view of KNN graph (num × knn_degree)
      */
-    void subgraph_build_and_merge(SearchParameter &param, float relaxant_factor, float &build_time,
-                                  raft::host_matrix_view<uint32_t, Index_t> h_knn_graph_view);
+    void subgraph_build(SearchParameter &param, float relaxant_factor, float &build_time,
+                        raft::host_matrix_view<uint32_t, Index_t> h_knn_graph_view);
 
     /**
      * @brief Add reverse edges to the graph

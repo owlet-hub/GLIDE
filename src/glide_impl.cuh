@@ -48,7 +48,6 @@ GLIDE<Data_t, Index_t>::start_point_select(raft::host_vector_view<uint32_t> h_se
                                            raft::host_vector_view<uint32_t> h_reorder_start_points,
                                            raft::host_vector_view<uint32_t> h_start_points,
                                            float &build_time) {
-    uint32_t start_point_num = h_segment_start_view.extent(0);
     thread_local std::mt19937 generator(std::random_device{}());
 
     cudaEvent_t start_time, stop_time;
@@ -57,13 +56,13 @@ GLIDE<Data_t, Index_t>::start_point_select(raft::host_vector_view<uint32_t> h_se
     cudaEventCreate(&stop_time);
 
     cudaEventRecord(start_time);
-    for (uint32_t i = 0; i < start_point_num; i++) {
+    for (uint32_t i = 0; i < h_segment_start_view.extent(0); i++) {
         std::uniform_int_distribution<uint32_t> dist(0, h_segment_length_view(i) - 1);
         uint32_t segment_start = h_segment_start_view(i);
         uint32_t id = dist(generator);
 
         h_reorder_start_points(i) = id;
-        if (i != start_point_num - 1) {
+        if (i != centroid_num()) {
             h_start_points(i) = h_map_view(segment_start + id);
         }
     }
@@ -332,7 +331,7 @@ GLIDE<Data_t, Index_t>::build(IndexParameter &build_param, SearchParameter &sear
                               std::string &result_file) {
     float build_time = 0.0f;
 
-    auto h_start_point = raft::make_host_vector<uint32_t, uint32_t>(handle, d_segment_start->size() - 1);
+    auto h_start_point = raft::make_host_vector<uint32_t, uint32_t>(handle, centroid_num());
     auto h_reorder_start_point = raft::make_host_vector<uint32_t, uint32_t>(handle, d_segment_start->size());
 
     start_point_select(h_segment_start_view, h_segment_length_view, h_map_view,
@@ -452,5 +451,4 @@ GLIDE<Data_t, Index_t>::search(SearchParameter &param,
                raft::resource::get_cuda_stream(handle));
     raft::copy(result_dists.data_handle(), d_result_dists.data_handle(), query_number * top_k,
                raft::resource::get_cuda_stream(handle));
-    nvtxRangePop();
 }
