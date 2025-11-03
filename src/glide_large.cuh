@@ -198,6 +198,31 @@ protected:
     */
     void refine(SearchParameter &param, float relaxant_factor, float &build_time);
 
+    /**
+     * @brief Build and merge subgraphs
+     *
+     * @param param Search parameter for build
+     * @param relaxant_factor Relaxation factor for pruning
+     * @param build_time Reference to accumulate build time
+     * @param h_knn_graph_view Host matrix view of KNN graph (num × knn_degree)
+     */
+    void subgraph_build_and_merge(SearchParameter &param, float relaxant_factor, float &build_time,
+                                  raft::host_matrix_view<uint32_t, Index_t> h_knn_graph_view);
+
+    /**
+     * @brief Add reverse edges to the final graph
+     *
+     * @param build_time Reference to accumulate build time
+     */
+    void reverse_all_graph(float &build_time);
+
+    /**
+     * @brief Merge sub-graphs
+     *
+     * @param build_time Reference to accumulate build time
+     */
+    void merge(SearchParameter &param, float &build_time);
+
 private:
     raft::device_resources &handle; /// RAFT device resources
 

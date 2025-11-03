@@ -349,3 +349,98 @@ struct search_on_sub_kernel_config {
         }
     }
 };
+
+template<typename Data_t, typename Index_t>
+struct define_partition_merge_kernel_config {
+    using kernel_t = decltype(&define_partition_merge_kernel<32, Data_t, Index_t>);
+
+    static auto choose_kernel(uint32_t centroids_num) -> kernel_t {
+        if (centroids_num <= 32) {
+            return define_partition_merge_kernel<32, Data_t, Index_t>;
+        } else if (centroids_num <= 64) {
+            return define_partition_merge_kernel<64, Data_t, Index_t>;
+        } else if (centroids_num <= 128) {
+            return define_partition_merge_kernel<128, Data_t, Index_t>;
+        } else if (centroids_num <= 256) {
+            return define_partition_merge_kernel<256, Data_t, Index_t>;
+        } else {
+            throw std::invalid_argument("Unsupported centroids_num");
+        }
+    }
+};
+
+template <typename Data_t, typename Index_t>
+struct data_locality_kernel_config {
+    using kernel_t = decltype(&data_locality_kernel<32, Data_t, Index_t>);
+
+    static auto choose_kernel(uint32_t centroids_num) -> kernel_t {
+        if (centroids_num <= 32) {
+            return data_locality_kernel<32, Data_t, Index_t>;
+        } else if (centroids_num <= 64) {
+            return data_locality_kernel<64, Data_t, Index_t>;
+        } else if (centroids_num <= 128) {
+            return data_locality_kernel<128, Data_t, Index_t>;
+        } else if (centroids_num <= 256) {
+            return data_locality_kernel<256, Data_t, Index_t>;
+        } else {
+            throw std::invalid_argument("Unsupported centroids_num");
+        }
+    }
+};
+
+template<typename Data_t, typename Index_t>
+struct random_identification_1_kernel_config {
+    using kernel_t = decltype(&random_identification_1_kernel<32, Data_t, Index_t>);
+
+    static auto choose_kernel(uint32_t centroids_num) -> kernel_t {
+        if (centroids_num <= 32) {
+            return random_identification_1_kernel<32, Data_t, Index_t>;
+        } else if (centroids_num <= 64) {
+            return random_identification_1_kernel<64, Data_t, Index_t>;
+        } else if (centroids_num <= 128) {
+            return random_identification_1_kernel<128, Data_t, Index_t>;
+        } else if (centroids_num <= 256) {
+            return random_identification_1_kernel<256, Data_t, Index_t>;
+        } else {
+            throw std::invalid_argument("Unsupported centroids_num");
+        }
+    }
+};
+
+template<typename Data_t, typename Index_t>
+struct random_identification_2_kernel_config {
+    using kernel_t = decltype(&random_identification_2_kernel<32, Data_t, Index_t>);
+
+    static auto choose_kernel(uint32_t centroids_num) -> kernel_t {
+        if (centroids_num <= 32) {
+            return random_identification_2_kernel<32, Data_t, Index_t>;
+        } else if (centroids_num <= 64) {
+            return random_identification_2_kernel<64, Data_t, Index_t>;
+        } else if (centroids_num <= 128) {
+            return random_identification_2_kernel<128, Data_t, Index_t>;
+        } else if (centroids_num <= 256) {
+            return random_identification_2_kernel<256, Data_t, Index_t>;
+        } else {
+            throw std::invalid_argument("Unsupported centroids_num");
+        }
+    }
+};
+
+template<typename Data_t, typename Index_t>
+struct boundary_identification_kernel_config {
+    using kernel_t = decltype(&boundary_identification_kernel<32, Data_t, Index_t>);
+
+    static auto choose_kernel(uint32_t centroids_num) -> kernel_t {
+        if (centroids_num <= 32) {
+            return boundary_identification_kernel<32, Data_t, Index_t>;
+        } else if (centroids_num <= 64) {
+            return boundary_identification_kernel<64, Data_t, Index_t>;
+        } else if (centroids_num <= 128) {
+            return boundary_identification_kernel<128, Data_t, Index_t>;
+        } else if (centroids_num <= 256) {
+            return boundary_identification_kernel<256, Data_t, Index_t>;
+        } else {
+            throw std::invalid_argument("Unsupported centroids_num");
+        }
+    }
+};

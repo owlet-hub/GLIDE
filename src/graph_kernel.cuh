@@ -589,7 +589,6 @@ refine_kernel(const Data_t *data, uint32_t *graph, const uint32_t *start_points,
     }
 
     extern __shared__ uint32_t shared_mem[];
-
     uint32_t result_buffer_size = beam + graph_degree;
     result_buffer_size = roundUp32(result_buffer_size);
 
@@ -818,4 +817,34 @@ refine_for_large_kernel(const Data_t *data, uint32_t *graph, uint32_t start_poin
         }
     }
     __syncthreads();
+}
+
+__global__ void
+merge_1_kernel(uint32_t *graph, uint32_t *entry_graph, uint32_t graph_degree, uint32_t *map,
+             uint32_t num, uint32_t offset) {
+    uint32_t point_id = blockIdx.x + offset;
+    if (point_id >= num) {
+        return;
+    }
+
+    map_to_graph_sub(entry_graph + static_cast<uint64_t>(map[point_id]) * graph_degree,
+                     graph + static_cast<uint64_t>(point_id) * graph_degree, map, graph_degree);
+}
+
+__global__ void
+merge_2_kernel(uint32_t *graph, uint32_t *entry_graph, uint32_t graph_degree, uint32_t max_graph_degree,
+               uint32_t *map, uint32_t bitmap_size, uint32_t num, uint32_t offset) {
+    uint32_t point_id = blockIdx.x + offset;
+    if (point_id >= num) {
+        return;
+    }
+
+    extern __shared__ uint32_t shared_mem[];
+
+    auto *s_graph = reinterpret_cast<uint32_t *>(shared_mem);
+    auto *bitmap = reinterpret_cast<uint32_t *>(s_graph + max_graph_degree);
+
+    map_to_graph_boundary(entry_graph + static_cast<uint64_t>(map[point_id]) * graph_degree, s_graph,
+                          graph + static_cast<uint64_t>(point_id) * graph_degree, map, graph_degree,
+                          max_graph_degree, bitmap, bitmap_size);
 }

@@ -25,6 +25,7 @@ GLIDE_large<Data_t, Index_t>::GLIDE_large(raft::device_resources &handle, uint32
           h_start_point{raft::make_host_vector<uint32_t>(segment_num())},
           h_graph{raft::make_host_matrix<uint32_t, Index_t, raft::row_major>(num(), graph_degree)} {
 }
+
 template<typename Data_t, typename Index_t>
 GLIDE_large<Data_t, Index_t>::GLIDE_large(raft::device_resources &handle, Metric metric,
                                           std::string &reorder_file, std::string &map_file,
@@ -76,8 +77,8 @@ GLIDE_large<Data_t, Index_t>::start_point_select(float &build_time) {
 
 template<typename Data_t, typename Index_t>
 void
-GLIDE_large<Data_t, Index_t>::subgraph_build_and_merge(SearchParameter &param, float relaxant_factor, float &build_time,
-                                                       raft::host_matrix_view<uint32_t, Index_t> h_knn_graph_view) {
+GLIDE_large<Data_t, Index_t>::subgraph_build(SearchParameter &param, float relaxant_factor, float &build_time,
+                                             raft::host_matrix_view<uint32_t, Index_t> h_knn_graph_view) {
     uint32_t knn_degree = h_knn_graph_view.extent(1);
 
     cudaEvent_t start_time, stop_time;
@@ -504,4 +505,231 @@ GLIDE_large<Data_t, Index_t>::search(SearchParameter &param, uint32_t min_segmen
                raft::resource::get_cuda_stream(handle));
     raft::copy(h_result_distances_view.data_handle(), d_final_result_distances.data_handle(), query_number * top_k,
                raft::resource::get_cuda_stream(handle));
+}
+
+template<typename Data_t, typename Index_t>
+void
+GLIDE_large<Data_t, Index_t>::subgraph_build_and_merge(SearchParameter &param, float relaxant_factor, float &build_time,
+                                                       raft::host_matrix_view<uint32_t, Index_t> h_knn_graph_view) {
+    uint32_t knn_degree = h_knn_graph_view.extent(1);
+
+    cudaEvent_t start_time, stop_time;
+    float milliseconds = 0;
+    cudaEventCreate(&start_time);
+    cudaEventCreate(&stop_time);
+
+    cudaDeviceProp deviceProp = raft::resource::get_device_properties(handle);
+
+    uint32_t max_size = deviceProp.maxGridSize[1];
+
+    uint32_t result_buffer_size = param.beam + knn_degree;
+    result_buffer_size = roundUp32(result_buffer_size);
+    uint32_t bitmap_size = ceildiv<uint32_t>(param.beam, 32);
+    uint32_t max_graph_degree = roundUp32(graph_degree());
+
+    uint32_t shared_mem_size = dim() * sizeof(Data_t) +
+                               result_buffer_size * (sizeof(uint32_t) + sizeof(float)) +
+                               max_graph_degree * sizeof(uint32_t) +
+                               hashmap::get_size(param.hash_bit) * sizeof(uint32_t) +
+                               1 * sizeof(uint32_t) + 3 * sizeof(uint32_t) +
+                               1 * sizeof(uint32_t) + 2 * sizeof(uint32_t) +
+                               bitmap_size * sizeof(uint32_t);
+    assert(shared_mem_size <= deviceProp.sharedMemPerBlock);
+
+    cudaStream_t stream = raft::resource::get_cuda_stream(handle);
+    for (uint32_t segment_id = 0; segment_id < segment_num(); segment_id++) {
+        uint32_t start = segment_start_view()(segment_id);
+        uint32_t length = segment_length_view()(segment_id);
+        uint32_t start_point_select = start_point_view()(segment_id);
+
+        Index_t data_start_pos = static_cast<Index_t>(start) * dim();
+        Index_t graph_start_pos = static_cast<Index_t>(start) * graph_degree();
+        Index_t knn_start_pos = static_cast<Index_t>(start) * knn_degree;
+        Index_t data_length = static_cast<Index_t>(length) * dim();
+        Index_t graph_length = static_cast<Index_t>(length) * graph_degree();
+        Index_t knn_length = static_cast<Index_t>(length) * knn_degree;
+
+        auto d_data = raft::make_device_matrix<Data_t, Index_t>(handle, length, dim());
+        raft::copy(d_data.data_handle(), data_view().data_handle() + data_start_pos,
+                   data_length, raft::resource::get_cuda_stream(handle));
+
+        auto d_knn_graph = raft::make_device_matrix<uint32_t, Index_t>(handle, length, knn_degree);
+        raft::copy(d_knn_graph.data_handle(), h_knn_graph_view.data_handle() + knn_start_pos,
+                   knn_length, raft::resource::get_cuda_stream(handle));
+
+        auto d_graph = raft::make_device_matrix<uint32_t, Index_t>(handle, length, graph_degree());
+
+        uint32_t max_points = std::min(length, max_size);
+
+        auto kernel = build_for_large_kernel_config<Data_t, Index_t>::choose_kernel(param.beam, knn_degree);
+
+        cudaEventRecord(start_time);
+        for (uint32_t pid = 0; pid < length; pid += max_points) {
+            uint32_t number_for_build = std::min(max_points, length - pid);
+
+            uint32_t threads_per_block = set_block_size(handle, knn_degree, param.search_block_size,
+                                                        shared_mem_size, number_for_build);
+            uint32_t blocks_per_grim = number_for_build;
+
+            kernel<<<blocks_per_grim, threads_per_block, shared_mem_size, stream>>>(d_data.data_handle(),
+                                                                                    d_graph.data_handle(),
+                                                                                    start_point_select,
+                                                                                    knn_degree,
+                                                                                    graph_degree(),
+                                                                                    max_graph_degree,
+                                                                                    dim(),
+                                                                                    d_knn_graph.data_handle(),
+                                                                                    param.beam,
+                                                                                    param.hash_bit,
+                                                                                    param.hash_reset_interval,
+                                                                                    param.max_iterations,
+                                                                                    param.min_iterations,
+                                                                                    length,
+                                                                                    pid,
+                                                                                    relaxant_factor,
+                                                                                    metric);
+            RAFT_CUDA_TRY(cudaPeekAtLastError());
+        }
+        cudaEventRecord(stop_time);
+        cudaEventSynchronize(stop_time);
+        cudaEventElapsedTime(&milliseconds, start_time, stop_time);
+        build_time += milliseconds / 1000.0f;
+
+        raft::copy(h_graph.data_handle() + graph_start_pos, d_graph.data_handle(),
+                   graph_length, raft::resource::get_cuda_stream(handle));
+    }
+}
+
+template<typename Data_t, typename Index_t>
+void
+GLIDE_large<Data_t, Index_t>::merge(SearchParameter &param, float &build_time) {
+    uint32_t segment = segment_num()-1;
+    uint32_t real_num = segment_start_view()[segment];
+
+    cudaEvent_t start_time, stop_time;
+    float milliseconds = 0;
+    cudaEventCreate(&start_time);
+    cudaEventCreate(&stop_time);
+
+    cudaDeviceProp deviceProp = raft::resource::get_device_properties(handle);
+
+    uint32_t max_size = deviceProp.maxGridSize[1];
+
+    uint32_t bitmap_size = ceildiv<uint32_t>(param.beam, 32);
+    uint32_t max_graph_degree = roundUp32(graph_degree());
+
+    auto entry_start_point = raft::make_host_vector<uint32_t>(handle, segment_num()-1);
+    auto entry_graph = raft::make_host_matrix<uint32_t, Index_t>(handle, real_num, graph_degree());
+
+    auto d_entry_graph = raft::make_device_matrix<uint32_t, Index_t>(handle, real_num, graph_degree());
+
+    cudaStream_t stream = raft::resource::get_cuda_stream(handle);
+    for (uint32_t segment_id = 0; segment_id < segment; segment_id++) {
+        uint32_t start = segment_start_view()(segment_id);
+        uint32_t length = segment_length_view()(segment_id);
+        entry_start_point(segment_id) = map_view()(start_point_view()(segment_id));
+
+        Index_t graph_start_pos = static_cast<Index_t>(start) * graph_degree();
+        Index_t graph_length = static_cast<Index_t>(length) * graph_degree();
+
+        auto d_graph = raft::make_device_matrix<uint32_t, Index_t>(handle, length, graph_degree());
+        raft::copy(d_graph.data_handle(), graph_view().data_handle() + graph_start_pos,
+                   graph_length, raft::resource::get_cuda_stream(handle));
+
+        auto d_map = raft::make_device_vector<uint32_t>(handle, length);
+        raft::copy(d_map.data_handle(), map_view().data_handle() + start,
+                   length, raft::resource::get_cuda_stream(handle));
+
+        uint32_t max_points = std::min(length, max_size);
+
+        cudaEventRecord(start_time);
+        for (uint32_t pid = 0; pid < length; pid += max_points) {
+            uint32_t number_for_build = std::min(max_points, length - pid);
+
+            uint32_t threads_per_block = max_graph_degree;
+            uint32_t blocks_per_grim = number_for_build;
+
+            merge_1_kernel<<<blocks_per_grim, threads_per_block, 0, stream>>>(d_graph.data_handle(),
+                                                                              d_entry_graph.data_handle(),
+                                                                              graph_degree(),
+                                                                              d_map.data_handle(),
+                                                                              length,
+                                                                              pid);
+            RAFT_CUDA_TRY(cudaPeekAtLastError());
+        }
+        cudaEventRecord(stop_time);
+        cudaEventSynchronize(stop_time);
+        cudaEventElapsedTime(&milliseconds, start_time, stop_time);
+        build_time += milliseconds / 1000.0f;
+    }
+
+    {
+        uint32_t start = segment_start_view()(segment);
+        uint32_t length = segment_length_view()(segment);
+
+        Index_t graph_start_pos = static_cast<Index_t>(start) * graph_degree();
+        Index_t graph_length = static_cast<Index_t>(length) * graph_degree();
+
+        auto d_graph = raft::make_device_matrix<uint32_t, Index_t>(handle, length, graph_degree());
+        raft::copy(d_graph.data_handle(), graph_view().data_handle() + graph_start_pos,
+                   graph_length, raft::resource::get_cuda_stream(handle));
+        auto d_map = raft::make_device_vector<uint32_t>(handle, length);
+        raft::copy(d_map.data_handle(), map_view().data_handle() + start,
+                   length, raft::resource::get_cuda_stream(handle));
+
+        uint32_t max_points = std::min(length, max_size);
+        uint32_t shared_mem_size = max_graph_degree * sizeof(uint32_t) + bitmap_size * sizeof(uint32_t);
+        assert(shared_mem_size <= deviceProp.sharedMemPerBlock);
+
+        cudaEventRecord(start_time);
+        for (uint32_t pid = 0; pid < length; pid += max_points) {
+            uint32_t number_for_build = std::min(max_points, length - pid);
+
+            uint32_t threads_per_block = max_graph_degree;
+            uint32_t blocks_per_grim = number_for_build;
+
+            merge_2_kernel<<<blocks_per_grim, threads_per_block, shared_mem_size, stream>>>(
+                    d_graph.data_handle(),
+                    d_entry_graph.data_handle(),
+                    graph_degree(),
+                    max_graph_degree,
+                    d_map.data_handle(),
+                    bitmap_size,
+                    length,
+                    pid);
+            RAFT_CUDA_TRY(cudaPeekAtLastError());
+        }
+        cudaEventRecord(stop_time);
+        cudaEventSynchronize(stop_time);
+        cudaEventElapsedTime(&milliseconds, start_time, stop_time);
+        build_time += milliseconds / 1000.0f;
+    }
+
+    raft::copy(entry_graph.data_handle(), d_entry_graph.data_handle(),
+               static_cast<Index_t>(real_num)*graph_degree(), raft::resource::get_cuda_stream(handle));
+
+    h_graph = std::move(entry_graph);
+    h_start_point = std::move(entry_start_point);
+}
+
+template<typename Data_t, typename Index_t>
+void
+GLIDE_large<Data_t, Index_t>::build_with_merge(IndexParameter &build_param, SearchParameter &search_param_knn,
+                                               raft::host_matrix_view<uint32_t, Index_t> h_knn_graph_view,
+                                               std::string &result_file) {
+    float build_time = 0.0f;
+
+    start_point_select(build_time);
+
+    subgraph_build_and_merge(search_param_knn, build_param.relaxant_factor, build_time, h_knn_graph_view);
+
+    reverse_graph(build_time);
+
+    merge(search_param_knn, build_time);
+
+    std::cout << "index build time: " << build_time << " s" << std::endl;
+
+    std::ofstream result_out(result_file, std::ios::app);
+    result_out << build_time << ",";
+    result_out.close();
 }
