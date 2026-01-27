@@ -56,6 +56,9 @@ get_centroids(raft::device_resources &handle,
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -98,21 +101,24 @@ define_partition(raft::device_resources &handle,
             d_segment_index_view.data_handle(),
             boundary_fact,
             metric);
-    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+    RAFT_CUDA_TRY(cudaPeekAtLastError());
     cudaEventRecord(stop_time);
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
 
     raft::copy(h_segment_length_view.data_handle(), d_segment_length.data_handle(),
-               d_segment_length.size(), raft::resource::get_cuda_stream(handle));
-    raft::resource::sync_stream(handle);
+               d_segment_length.size(), stream);
+    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
 
     uint32_t start = 0;
     for (uint32_t i = 0; i < h_segment_length_view.size(); i++) {
         h_segment_start_view(i) = start;
         start += h_segment_length_view(i);
     }
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -139,7 +145,7 @@ reorder(raft::device_resources &handle,
     cudaEventRecord(start_time);
     auto d_segment_start = raft::make_device_vector<uint32_t>(handle, h_segment_start_view.size());
     raft::copy(d_segment_start.data_handle(), h_segment_start_view.data_handle(),
-               h_segment_start_view.size(), raft::resource::get_cuda_stream(handle));
+               h_segment_start_view.size(), stream);
 
     reorder_kernel<Data_t, Index_t><<<blocks_per_grid, threads_per_block, 0, stream>>>(
             d_data_view.data_handle(),
@@ -154,6 +160,9 @@ reorder(raft::device_resources &handle,
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -209,6 +218,7 @@ void get_centroids_for_large(raft::device_resources &handle,
     float milliseconds = 0;
 
     auto d_sample_data = raft::make_device_matrix<float, int>(handle, sample_num, dim);
+    cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
 
     cudaEventRecord(start_time);
     std::vector<uint32_t> indices(num);
@@ -216,8 +226,7 @@ void get_centroids_for_large(raft::device_resources &handle,
     std::mt19937 gen(std::random_device{}());
     std::shuffle(indices.begin(), indices.end(), gen);
     auto d_indices = raft::make_device_vector<uint32_t>(handle, sample_num);
-    raft::copy(d_indices.data_handle(), indices.data(), sample_num,
-               raft::resource::get_stream_from_stream_pool(handle));
+    raft::copy(d_indices.data_handle(), indices.data(), sample_num, stream);
     cudaEventRecord(stop_time);
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
@@ -233,10 +242,10 @@ void get_centroids_for_large(raft::device_resources &handle,
     for (uint32_t i = 0; i < batch_num; i++) {
         uint32_t start_id = i * batch_size;
         raft::copy(d_data_view.data_handle(), h_data_view.data_handle() + static_cast<Index_t>(start_id) * dim,
-                   static_cast<Index_t>(batch_size) * dim, raft::resource::get_cuda_stream(handle));
+                   static_cast<Index_t>(batch_size) * dim, stream);
 
         cudaEventRecord(start_time);
-        sample_for_large_kernel<Data_t, Index_t><<<blocks_per_grid, threads_per_block>>>(
+        sample_for_large_kernel<Data_t, Index_t><<<blocks_per_grid, threads_per_block, 0, stream>>>(
                 d_data_view.data_handle(),
                 d_sample_data.data_handle(),
                 d_indices.data_handle(),
@@ -263,6 +272,9 @@ void get_centroids_for_large(raft::device_resources &handle,
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -302,7 +314,7 @@ void define_partition_for_large(raft::device_resources &handle,
         uint32_t start_id = i * batch_size;
 
         raft::copy(d_data_view.data_handle(), h_data_view.data_handle() + static_cast<Index_t>(start_id) * dim,
-                   static_cast<Index_t>(batch_size) * dim, raft::resource::get_cuda_stream(handle));
+                   static_cast<Index_t>(batch_size) * dim, stream);
 
         auto d_segment_index_ptr = d_segment_index_view.data_handle() + start_id;
 
@@ -316,7 +328,7 @@ void define_partition_for_large(raft::device_resources &handle,
                 d_segment_length.data_handle(),
                 d_segment_index_ptr,
                 metric);
-        RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+        RAFT_CUDA_TRY(cudaPeekAtLastError());
         cudaEventRecord(stop_time);
         cudaEventSynchronize(stop_time);
         cudaEventElapsedTime(&milliseconds, start_time, stop_time);
@@ -325,14 +337,17 @@ void define_partition_for_large(raft::device_resources &handle,
     build_time += define_time;
 
     raft::copy(h_segment_length_view.data_handle(), d_segment_length.data_handle(),
-               h_segment_length_view.size(), raft::resource::get_stream_from_stream_pool(handle));
-    raft::resource::sync_stream(handle);
+               h_segment_length_view.size(), stream);
+    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
 
     uint32_t start = 0;
     for (uint32_t i = 0; i < h_segment_length_view.size(); i++) {
         h_segment_start_view(i) = start;
         start += h_segment_length_view(i);
     }
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -364,12 +379,12 @@ void reorder_for_large_dataset(raft::device_resources &handle,
         uint32_t start_id = i * batch_size;
 
         auto d_counts = raft::make_device_vector<uint32_t>(handle, segment_num);
-        thrust::fill(thrust::device, d_counts.data_handle(),
+        thrust::fill(thrust::device.on(stream), d_counts.data_handle(),
                      d_counts.data_handle() + d_counts.size(), 0);
 
         auto d_segment_index_ptr = d_segment_index_view.data_handle() + start_id;
         raft::copy(d_data_view.data_handle(), h_data_view.data_handle() + static_cast<Index_t>(start_id) * dim,
-                   static_cast<Index_t>(batch_size) * dim, raft::resource::get_cuda_stream(handle));
+                   static_cast<Index_t>(batch_size) * dim, stream);
 
         for (uint32_t segment_id = 0; segment_id < segment_num; segment_id++) {
             uint32_t segment_start = h_segment_start_view(segment_id);
@@ -388,7 +403,7 @@ void reorder_for_large_dataset(raft::device_resources &handle,
                     segment_id,
                     d_counts.data_handle(),
                     start_id);
-            RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+            RAFT_CUDA_TRY(cudaPeekAtLastError());
             cudaEventRecord(stop_time);
             cudaEventSynchronize(stop_time);
             cudaEventElapsedTime(&milliseconds, start_time, stop_time);
@@ -396,22 +411,26 @@ void reorder_for_large_dataset(raft::device_resources &handle,
 
             auto h_counts = raft::make_host_vector<uint32_t>(segment_num);
             raft::copy(h_counts.data_handle(), d_counts.data_handle(), h_counts.size(),
-                       raft::resource::get_stream_from_stream_pool(handle));
+                       stream);
 
             raft::copy(h_map_view.data_handle() + segment_start + current_counts[segment_id],
                        d_batch_map.data_handle(),
                        h_counts(segment_id),
-                       raft::resource::get_cuda_stream(handle));
+                       stream);
             raft::copy(h_reorder_data_view.data_handle() +
                        static_cast<Index_t>(segment_start + current_counts[segment_id]) * dim,
                        d_batch_data.data_handle(),
                        static_cast<Index_t>(h_counts(segment_id)) * dim,
-                       raft::resource::get_cuda_stream(handle));
+                       stream);
+            RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
 
             current_counts[segment_id] += h_counts(segment_id);
         }
     }
     build_time += reorder_time;
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -483,7 +502,7 @@ void define_partition_merge(raft::device_resources &handle,
         uint32_t start_id = i * batch_size;
 
         raft::copy(d_data_view.data_handle(), h_data_view.data_handle() + static_cast<Index_t>(start_id) * dim,
-                   static_cast<Index_t>(batch_size) * dim, raft::resource::get_cuda_stream(handle));
+                   static_cast<Index_t>(batch_size) * dim, stream);
 
         auto d_segment_index_ptr = d_segment_index_view.data_handle() + start_id * 2;
 
@@ -498,7 +517,7 @@ void define_partition_merge(raft::device_resources &handle,
                 d_segment_index_ptr,
                 boundary_fact,
                 metric);
-        RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+        RAFT_CUDA_TRY(cudaPeekAtLastError());
         cudaEventRecord(stop_time);
         cudaEventSynchronize(stop_time);
         cudaEventElapsedTime(&milliseconds, start_time, stop_time);
@@ -507,14 +526,17 @@ void define_partition_merge(raft::device_resources &handle,
     build_time += define_time;
 
     raft::copy(h_segment_length_view.data_handle(), d_segment_length.data_handle(),
-               h_segment_length_view.size(), raft::resource::get_stream_from_stream_pool(handle));
-    raft::resource::sync_stream(handle);
+               h_segment_length_view.size(), stream);
+    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
 
     uint32_t start = 0;
     for (uint32_t i = 0; i < h_segment_length_view.size(); i++) {
         h_segment_start_view(i) = start;
         start += h_segment_length_view(i);
     }
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -546,12 +568,12 @@ void reorder_merge_dataset(raft::device_resources &handle,
         uint32_t start_id = i * batch_size;
 
         auto d_counts = raft::make_device_vector<uint32_t>(handle, segment_num);
-        thrust::fill(thrust::device, d_counts.data_handle(),
+        thrust::fill(thrust::device.on(stream), d_counts.data_handle(),
                      d_counts.data_handle() + d_counts.size(), 0);
 
         auto d_segment_index_ptr = d_segment_index_view.data_handle() + start_id * 2;
         raft::copy(d_data_view.data_handle(), h_data_view.data_handle() + static_cast<Index_t>(start_id) * dim,
-                   static_cast<Index_t>(batch_size) * dim, raft::resource::get_cuda_stream(handle));
+                   static_cast<Index_t>(batch_size) * dim, stream);
 
         for (uint32_t segment_id = 0; segment_id < segment_num; segment_id++) {
             uint32_t segment_start = h_segment_start_view(segment_id);
@@ -571,7 +593,7 @@ void reorder_merge_dataset(raft::device_resources &handle,
                     d_counts.data_handle(),
                     (segment_id == segment_num - 1),
                     start_id);
-            RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+            RAFT_CUDA_TRY(cudaPeekAtLastError());
             cudaEventRecord(stop_time);
             cudaEventSynchronize(stop_time);
             cudaEventElapsedTime(&milliseconds, start_time, stop_time);
@@ -579,22 +601,26 @@ void reorder_merge_dataset(raft::device_resources &handle,
 
             auto h_counts = raft::make_host_vector<uint32_t>(segment_num);
             raft::copy(h_counts.data_handle(), d_counts.data_handle(), h_counts.size(),
-                       raft::resource::get_stream_from_stream_pool(handle));
+                       stream);
 
             raft::copy(h_map_view.data_handle() + segment_start + current_counts[segment_id],
                        d_batch_map.data_handle(),
                        h_counts(segment_id),
-                       raft::resource::get_cuda_stream(handle));
+                       stream);
             raft::copy(h_reorder_data_view.data_handle() +
                        static_cast<Index_t>(segment_start + current_counts[segment_id]) * dim,
                        d_batch_data.data_handle(),
                        static_cast<Index_t>(h_counts(segment_id)) * dim,
-                       raft::resource::get_cuda_stream(handle));
+                       stream);
+            RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
 
             current_counts[segment_id] += h_counts(segment_id);
         }
     }
     build_time += reorder_time;
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -665,18 +691,20 @@ void sequential_partition(raft::device_resources &handle, PartitionParameter par
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
 
+    cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
+
     auto d_segment_start = raft::make_device_vector<uint32_t>(handle, h_segment_start_view.size());
     raft::copy(d_segment_start.data_handle(), h_segment_start_view.data_handle(),
-               h_segment_start_view.size(), raft::resource::get_cuda_stream(handle));
+               h_segment_start_view.size(), stream);
     auto d_segment_length = raft::make_device_vector<uint32_t>(handle, h_segment_length_view.size());
     raft::copy(d_segment_length.data_handle(), h_segment_length_view.data_handle(),
-               h_segment_length_view.size(), raft::resource::get_cuda_stream(handle));
+               h_segment_length_view.size(), stream);
 
     uint32_t threads_per_block = 256;
     dim3 grid(dim, centroid_num);
     uint32_t warp_num = (threads_per_block + 31) / 32;
     uint32_t shared_mem_size = warp_num * sizeof(float);
-    cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
+    
 
     cudaEventRecord(start_time);
     sequential_partition_kernel<Data_t, Index_t><<<grid, threads_per_block, shared_mem_size, stream>>>(
@@ -691,6 +719,9 @@ void sequential_partition(raft::device_resources &handle, PartitionParameter par
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -711,14 +742,16 @@ random_identification_1(raft::device_resources &handle,
     cudaEventCreate(&stop_time);
     float milliseconds = 0;
 
+    cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
+
     auto d_segment_start = raft::make_device_vector<uint32_t>(handle, h_segment_start_view.size());
     raft::copy(d_segment_start.data_handle(), h_segment_start_view.data_handle(),
-               h_segment_start_view.size(), raft::resource::get_cuda_stream(handle));
+               h_segment_start_view.size(), stream);
     auto d_segment_length = raft::make_device_vector<uint32_t>(handle, h_segment_length_view.size());
     raft::copy(d_segment_length.data_handle(), h_segment_length_view.data_handle(),
-               h_segment_length_view.size(), raft::resource::get_cuda_stream(handle));
+               h_segment_length_view.size(), stream);
     auto d_segment_boundary_num = raft::make_device_vector<uint32_t>(handle, centroid_num);
-    thrust::fill(thrust::device.on(raft::resource::get_stream_from_stream_pool(handle)),
+    thrust::fill(thrust::device.on(stream),
                  d_segment_boundary_num.data_handle(),
                  d_segment_boundary_num.data_handle() + d_segment_boundary_num.size(),
                  0);
@@ -727,7 +760,6 @@ random_identification_1(raft::device_resources &handle,
     uint32_t threads_per_block = 256;
     uint32_t blocks_per_grid = num;
 
-    cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
     auto kernel = random_identification_1_kernel_config<Data_t, Index_t>::choose_kernel(centroid_num);
 
     cudaEventRecord(start_time);
@@ -744,15 +776,18 @@ random_identification_1(raft::device_resources &handle,
             boundary_fact,
             boundary_part,
             metric);
-    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+    RAFT_CUDA_TRY(cudaPeekAtLastError());
     cudaEventRecord(stop_time);
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
 
     raft::copy(h_segment_length_view.data_handle(), d_segment_length.data_handle(),
-               d_segment_length.size(), raft::resource::get_cuda_stream(handle));
-    raft::resource::sync_stream(handle);
+               d_segment_length.size(), stream);
+    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -773,14 +808,16 @@ random_identification_2(raft::device_resources &handle,
     cudaEventCreate(&stop_time);
     float milliseconds = 0;
 
+    cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
+
     auto d_segment_start = raft::make_device_vector<uint32_t>(handle, h_segment_start_view.size());
     raft::copy(d_segment_start.data_handle(), h_segment_start_view.data_handle(),
-               h_segment_start_view.size(), raft::resource::get_cuda_stream(handle));
+               h_segment_start_view.size(), stream);
     auto d_segment_length = raft::make_device_vector<uint32_t>(handle, h_segment_length_view.size());
     raft::copy(d_segment_length.data_handle(), h_segment_length_view.data_handle(),
-               h_segment_length_view.size(), raft::resource::get_cuda_stream(handle));
+               h_segment_length_view.size(), stream);
     auto d_segment_boundary_num = raft::make_device_vector<uint32_t>(handle, centroid_num);
-    thrust::fill(thrust::device.on(raft::resource::get_stream_from_stream_pool(handle)),
+    thrust::fill(thrust::device.on(stream),
                  d_segment_boundary_num.data_handle(),
                  d_segment_boundary_num.data_handle() + d_segment_boundary_num.size(),
                  0);
@@ -789,7 +826,6 @@ random_identification_2(raft::device_resources &handle,
     uint32_t threads_per_block = 256;
     uint32_t blocks_per_grid = num;
 
-    cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
     auto kernel = random_identification_2_kernel_config<Data_t, Index_t>::choose_kernel(centroid_num);
 
     cudaEventRecord(start_time);
@@ -803,7 +839,7 @@ random_identification_2(raft::device_resources &handle,
             d_segment_index_view.data_handle(),
             boundary_fact,
             metric);
-    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+    RAFT_CUDA_TRY(cudaPeekAtLastError());
 
     define_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
             num,
@@ -812,21 +848,24 @@ random_identification_2(raft::device_resources &handle,
             d_segment_index_view.data_handle(),
             d_segment_boundary_num.data_handle(),
             boundary_part);
-    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+    RAFT_CUDA_TRY(cudaPeekAtLastError());
     cudaEventRecord(stop_time);
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
 
     raft::copy(h_segment_length_view.data_handle(), d_segment_length.data_handle(),
-               d_segment_length.size(), raft::resource::get_cuda_stream(handle));
-    raft::resource::sync_stream(handle);
+               d_segment_length.size(), stream);
+    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
 
     uint32_t start = 0;
     for (uint32_t i = 0; i < h_segment_length_view.size(); i++) {
         h_segment_start_view(i) = start;
         start += h_segment_length_view(i);
     }
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -847,14 +886,16 @@ boundary_identification(raft::device_resources &handle,
     cudaEventCreate(&stop_time);
     float milliseconds = 0;
 
+    cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
+
     auto d_segment_start = raft::make_device_vector<uint32_t>(handle, h_segment_start_view.size());
     raft::copy(d_segment_start.data_handle(), h_segment_start_view.data_handle(),
-               h_segment_start_view.size(), raft::resource::get_cuda_stream(handle));
+               h_segment_start_view.size(), stream);
     auto d_segment_length = raft::make_device_vector<uint32_t>(handle, h_segment_length_view.size());
     raft::copy(d_segment_length.data_handle(), h_segment_length_view.data_handle(),
-               h_segment_length_view.size(), raft::resource::get_cuda_stream(handle));
+               h_segment_length_view.size(), stream);
     auto d_segment_boundary_num = raft::make_device_vector<uint32_t>(handle, centroid_num);
-    thrust::fill(thrust::device.on(raft::resource::get_stream_from_stream_pool(handle)),
+    thrust::fill(thrust::device.on(stream),
                  d_segment_boundary_num.data_handle(),
                  d_segment_boundary_num.data_handle() + d_segment_boundary_num.size(),
                  0);
@@ -863,7 +904,6 @@ boundary_identification(raft::device_resources &handle,
     uint32_t threads_per_block = 256;
     uint32_t blocks_per_grid = num;
 
-    cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
     auto kernel = boundary_identification_kernel_config<Data_t, Index_t>::choose_kernel(centroid_num);
 
     cudaEventRecord(start_time);
@@ -880,15 +920,18 @@ boundary_identification(raft::device_resources &handle,
             boundary_fact,
             boundary_part,
             metric);
-    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+    RAFT_CUDA_TRY(cudaPeekAtLastError());
     cudaEventRecord(stop_time);
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
 
     raft::copy(h_segment_length_view.data_handle(), d_segment_length.data_handle(),
-               d_segment_length.size(), raft::resource::get_cuda_stream(handle));
-    raft::resource::sync_stream(handle);
+               d_segment_length.size(), stream);
+    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -901,8 +944,10 @@ compute_locality_score(raft::device_resources &handle, float boundary_fact, Metr
     uint32_t num = d_data_view.extent(0);
     uint32_t dim = d_data_view.extent(1);
 
+    cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
+
     auto d_locality_score = raft::make_device_vector<uint32_t>(handle, centroid_num);
-    thrust::fill(thrust::device.on(raft::resource::get_stream_from_stream_pool(handle)),
+    thrust::fill(thrust::device.on(stream),
                  d_locality_score.data_handle(),
                  d_locality_score.data_handle() + centroid_num,
                  0);
@@ -911,7 +956,6 @@ compute_locality_score(raft::device_resources &handle, float boundary_fact, Metr
     uint32_t threads_per_block = 256;
     uint32_t blocks_per_grid = num;
 
-    cudaStream_t stream = raft::resource::get_stream_from_stream_pool(handle);
     auto kernel = data_locality_kernel_config<Data_t, Index_t>::choose_kernel(centroid_num);
 
     kernel<<<blocks_per_grid, threads_per_block, shared_mem_size, stream>>>(
@@ -924,12 +968,12 @@ compute_locality_score(raft::device_resources &handle, float boundary_fact, Metr
             d_locality_score.data_handle(),
             boundary_fact,
             metric);
-    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
+    RAFT_CUDA_TRY(cudaPeekAtLastError());
 
     auto h_locality_score = raft::make_host_vector<uint32_t>(handle, centroid_num);
     raft::copy(h_locality_score.data_handle(), d_locality_score.data_handle(),
-               d_locality_score.size(), raft::resource::get_cuda_stream(handle));
-    raft::resource::sync_stream(handle);
+               d_locality_score.size(), stream);
+    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
 
     uint32_t total_score = 0;
     for (uint32_t i = 0; i < centroid_num; i++) {

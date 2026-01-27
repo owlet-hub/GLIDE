@@ -70,6 +70,9 @@ GLIDE<Data_t, Index_t>::start_point_select(raft::host_vector_view<uint32_t> h_se
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -185,10 +188,14 @@ GLIDE<Data_t, Index_t>::subgraph_build_and_merge(SearchParameter &param, float r
                                                                                   metric);
         RAFT_CUDA_TRY(cudaPeekAtLastError());
     }
+    RAFT_CUDA_TRY(cudaDeviceSynchronize());
     cudaEventRecord(stop_time);
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -203,14 +210,16 @@ GLIDE<Data_t, Index_t>::reverse_graph(float &build_time) {
     auto d_reverse_graph_degree = raft::make_device_vector<uint32_t>(handle, num());
     auto d_destination_nodes = raft::make_device_vector<uint32_t>(handle, num());
 
-    thrust::fill(thrust::device.on(raft::resource::get_stream_from_stream_pool(handle)),
+    cudaStream_t init_stream = raft::resource::get_stream_from_stream_pool(handle);
+    thrust::fill(thrust::device.on(init_stream),
                  d_reverse_graph.data_handle(),
                  d_reverse_graph.data_handle() + num() * graph_degree(),
                  0xffffffffu);
-    thrust::fill(thrust::device.on(raft::resource::get_stream_from_stream_pool(handle)),
+    thrust::fill(thrust::device.on(init_stream),
                  d_reverse_graph_degree.data_handle(),
                  d_reverse_graph_degree.data_handle() + num(),
                  0);
+    RAFT_CUDA_TRY(cudaStreamSynchronize(init_stream));
 
     cudaEventRecord(start_time);
     for (uint32_t degree_id = 0; degree_id < graph_degree(); degree_id++) {
@@ -229,7 +238,7 @@ GLIDE<Data_t, Index_t>::reverse_graph(float &build_time) {
                 degree_id);
         RAFT_CUDA_TRY(cudaPeekAtLastError());
     }
-//    RAFT_CUDA_TRY(cudaDeviceSynchronize());
+    RAFT_CUDA_TRY(cudaDeviceSynchronize());
     cudaEventRecord(stop_time);
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
@@ -249,10 +258,14 @@ GLIDE<Data_t, Index_t>::reverse_graph(float &build_time) {
             num(),
             graph_degree(),
             max_graph_degree);
+    RAFT_CUDA_TRY(cudaStreamSynchronize(stream));
     cudaEventRecord(stop_time);
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -310,10 +323,14 @@ GLIDE<Data_t, Index_t>::refine(SearchParameter &param, float relaxant_factor, fl
                                                                                 metric);
         RAFT_CUDA_TRY(cudaPeekAtLastError());
     }
+    RAFT_CUDA_TRY(cudaDeviceSynchronize());
     cudaEventRecord(stop_time);
     cudaEventSynchronize(stop_time);
     cudaEventElapsedTime(&milliseconds, start_time, stop_time);
     build_time += milliseconds / 1000.0f;
+
+    cudaEventDestroy(start_time);
+    cudaEventDestroy(stop_time);
 }
 
 template<typename Data_t, typename Index_t>
@@ -435,6 +452,7 @@ GLIDE<Data_t, Index_t>::search(SearchParameter &param,
                                                                                 metric);
         RAFT_CUDA_TRY(cudaPeekAtLastError());
     }
+    RAFT_CUDA_TRY(cudaDeviceSynchronize());
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&milliseconds, start, stop);
@@ -447,8 +465,11 @@ GLIDE<Data_t, Index_t>::search(SearchParameter &param,
     result << seconds << "," << (float) query_number / seconds << ",";
     result.close();
 
-    raft::copy(result_ids.data_handle(), d_result_ids.data_handle(), query_number * top_k,
-               raft::resource::get_cuda_stream(handle));
-    raft::copy(result_dists.data_handle(), d_result_dists.data_handle(), query_number * top_k,
-               raft::resource::get_cuda_stream(handle));
+    cudaStream_t result_stream = raft::resource::get_stream_from_stream_pool(handle);
+    raft::copy(result_ids.data_handle(), d_result_ids.data_handle(), query_number * top_k, result_stream);
+    raft::copy(result_dists.data_handle(), d_result_dists.data_handle(), query_number * top_k, result_stream);
+    RAFT_CUDA_TRY(cudaStreamSynchronize(result_stream));
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 }
