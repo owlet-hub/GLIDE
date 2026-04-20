@@ -1,6 +1,8 @@
 # GLIDE
 
-This is the source code of GLIDE, which is our paper "GLIDE: GPU-Accelerated ANN Graph Index Construction via Data Locality".
+This is the source code of GLIDE.
+
+Our paper, "GLIDE: GPU-Accelerated ANN Graph Index Construction via Data Locality", is accepted by ICDE2026.
 
 ## Directory description
 
